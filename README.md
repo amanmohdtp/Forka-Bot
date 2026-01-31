@@ -1,7 +1,7 @@
 # 🤖 Forka Bot
 
 Forka Bot is a high‑performance WhatsApp bot built with the Baileys library.  
-It features a seamless Pairing Code deployment system, eliminating the need for QR scanning.
+It features a Pairing Code deployment system, eliminating the need for QR scanning.
 
 <div align="center">
 
@@ -9,8 +9,9 @@ It features a seamless Pairing Code deployment system, eliminating the need for 
   <img src="https://readme-typing-svg.demolab.com?font=Odibee+Sans&size=45&pause=1000&center=true&vCenter=true&width=450&height=100&color=f0e130&lines=Forka-Bot;Pairing+Code+Deployment;Coded+By+Aman" alt="Typing SVG" />
 </a>
 
+<br/>
 
-<img src="https://github.com/amanmohdtp/Forka-Bot/blob/1d6fd5149f1c0bc1ff1d1d3201f397e859eb4e55/menu.png" alt="Forka Bot" height="300">
+<img src="https://cdn.jsdelivr.net/gh/amanmohdtp/database@06959cbdefa02cea2c711cd7924982913e1fadcd/menu.png" alt="Forka Bot" height="300">
 
 <br/>
 
@@ -83,7 +84,6 @@ Set these environment variables in your hosting dashboard:
 </div>
 
 ---
-
 
 <div align="center">
 <p>Coded with ❤️ by <b>Aman</b></p>
