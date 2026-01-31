@@ -43,29 +43,38 @@ export function setBotMode(mode) {
 
 export function isSudoUser(jid) {
   const db = loadDB();
-  const number = jid.split('@')[0];
-  return db.sudoUsers.includes(number);
+  // Normalize: accept either plain number or full JID
+  const number = typeof jid === 'string' ? jid.split('@')[0].replace(/[^0-9]/g, '') : '';
+  const result = db.sudoUsers.includes(number);
+  return result;
 }
 
 export function addSudoUser(jid) {
   const db = loadDB();
-  const number = jid.split('@')[0];
+  // Normalize: accept either plain number or full JID
+  const number = typeof jid === 'string' ? jid.split('@')[0].replace(/[^0-9]/g, '') : '';
   
+  if (!number) return false;
   if (db.sudoUsers.includes(number)) return false;
   
   db.sudoUsers.push(number);
-  return saveDB(db);
+  const saved = saveDB(db);
+  return saved;
 }
 
 export function removeSudoUser(jid) {
   const db = loadDB();
-  const number = jid.split('@')[0];
+  // Normalize: accept either plain number or full JID
+  const number = typeof jid === 'string' ? jid.split('@')[0].replace(/[^0-9]/g, '') : '';
+  
+  if (!number) return false;
   
   const index = db.sudoUsers.indexOf(number);
   if (index === -1) return false;
   
   db.sudoUsers.splice(index, 1);
-  return saveDB(db);
+  const saved = saveDB(db);
+  return saved;
 }
 
 export function getAllSudoUsers() {
