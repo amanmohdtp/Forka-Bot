@@ -1,0 +1,21 @@
+{
+  "name": "forka-bot",
+  "version": "2.0.0",
+  "description": "Minimal WhatsApp Bot using Baileys",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "amanmohdtp",
+  "license": "MIT",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.8",
+    "chalk": "^5.3.0",
+    "pino": "^8.19.0",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
