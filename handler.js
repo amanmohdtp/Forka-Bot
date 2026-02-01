@@ -6,52 +6,43 @@ import {
     isSudoUser,
     addSudoUser,
     removeSudoUser,
-    getAllSudoUsers
+    getAllSudoUsers,
+    getGroupSettings,
+    setGroupSettings,
+    getWelcomeMessage,
+    setWelcomeMessage,
+    getGoodbyeMessage,
+    setGoodbyeMessage,
+    getAutoAddGroup,
+    setAutoAddGroup,
+    removeAutoAddGroup
 } from './database.js';
 
+// Game states
+const tttGames = new Map();
+const rpsGames = new Map();
+
 export async function handleMessage(sock, msg, config) {
-    // Extract message body
     const m = msg.message;
     const body = (
         m?.conversation ||
         m?.extendedTextMessage?.text ||
         m?.imageMessage?.caption ||
         m?.videoMessage?.caption ||
-        m?.documentMessage?.caption ||
         ''
     ).trim();
 
-    // Log when body is empty for debugging
-    if (!body) {
-        console.log(chalk.gray('[DEBUG] Empty message body received'));
-        return;
-    }
+    if (!body) return;
 
     const from = msg.key.remoteJid;
-    const sender = msg.key.participant || from;
+    const sender = msg.key.participant || msg.key.remoteJid;
     const isGroup = from.endsWith('@g.us');
+    const senderNumber = sender.split('@')[0];
+    const botNumber = sock.user?.id?.split(':')[0] || '';
     
-    // Normalize sender to plain number for consistent comparison
-    const senderNumber = sender.split('@')[0].replace(/[^0-9]/g, '');
-
-    // Use PREFIX consistently (not config.prefix)
-    const PREFIX = config.prefix || '.';
-
-    // Check if message starts with prefix
-    if (!body.startsWith(PREFIX)) return;
-
-    // Parse command - guard against empty command
-    const args = body.slice(PREFIX.length).trim().split(/ +/);
-    const cmd = args.shift()?.toLowerCase();
-    
-    if (!cmd) {
-        console.log(chalk.yellow('[DEBUG] User sent only prefix, no command'));
-        return;
-    }
-
-    // Log command usage
-    const location = isGroup ? 'Group' : 'Private';
-    console.log(chalk.cyan(`💫 Command Used In ${location}: ${chalk.yellow(PREFIX + cmd)} | ${chalk.white(senderNumber)}`));
+    // Check if this is a self-message (sent by bot owner in their own DM)
+    const isSelfMessage = msg.key.fromMe;
+    const isSelfDM = !isGroup && sender.includes(botNumber);
 
     // Helper functions
     const reply = async (text) => {
@@ -72,26 +63,19 @@ export async function handleMessage(sock, msg, config) {
         return msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
     };
 
-    // EXACT owner check - compare normalized numbers only
     const isOwner = () => {
-        const ownerNum = (config.ownerNumber || '').replace(/[^0-9]/g, '');
-        if (!ownerNum) {
-            console.log(chalk.red('[DEBUG] OWNER_NUMBER not set in config'));
-            return false;
-        }
-        const isMatch = senderNumber === ownerNum;
-        console.log(chalk.gray(`[DEBUG] Owner check: sender=${senderNumber}, owner=${ownerNum}, match=${isMatch}`));
-        return isMatch;
+        const owner = (config.ownerNumber || '').replace(/[^0-9]/g, '');
+        const botNumber = sock.user?.id?.split(':')[0] || '';
+        
+        // Check if sender matches owner number or is the bot's own number
+        return (owner && senderNumber === owner) || senderNumber === botNumber;
     };
 
     const isAdmin = async () => {
         if (!isGroup) return false;
         try {
             const meta = await sock.groupMetadata(from);
-            return meta.participants.some(p => {
-                const participantNum = p.id.split('@')[0].replace(/[^0-9]/g, '');
-                return participantNum === senderNumber && p.admin;
-            });
+            return meta.participants.some(p => p.id === sender && (p.admin === 'admin' || p.admin === 'superadmin'));
         } catch {
             return false;
         }
@@ -101,28 +85,65 @@ export async function handleMessage(sock, msg, config) {
         if (!isGroup) return false;
         try {
             const meta = await sock.groupMetadata(from);
-            const botNum = sock.user?.id.split(':')[0].split('@')[0].replace(/[^0-9]/g, '');
-            return meta.participants.some(p => {
-                const participantNum = p.id.split('@')[0].replace(/[^0-9]/g, '');
-                return participantNum === botNum && p.admin;
-            });
+            const botJid = sock.user?.id;
+            return meta.participants.some(p => p.id === botJid && (p.admin === 'admin' || p.admin === 'superadmin'));
         } catch {
             return false;
         }
     };
 
-    // Access control - check BEFORE cooldown
+    // Antilink check
+    if (isGroup && body && !body.startsWith(config.prefix)) {
+        const settings = getGroupSettings(from);
+        if (settings.antilink) {
+            const linkRegex = /(https?:\/\/|www\.)[^\s]+/gi;
+            if (linkRegex.test(body)) {
+                const userIsAdmin = await isAdmin();
+                
+                // Check antilink mode
+                if (settings.antilinkMode === 'all' || 
+                   (settings.antilinkMode === 'users' && !userIsAdmin)) {
+                    
+                    if (await isBotAdmin()) {
+                        try {
+                            await sock.sendMessage(from, {
+                                delete: msg.key
+                            });
+                            await sock.sendMessage(from, {
+                                text: `⚠️ @${senderNumber} Links are not allowed!`,
+                                mentions: [sender]
+                            });
+                            return;
+                        } catch {}
+                    } else {
+                        await sock.sendMessage(from, {
+                            text: `⚠️ @${senderNumber} Links are not allowed! (Bot needs admin to delete)`,
+                            mentions: [sender]
+                        });
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if message starts with prefix
+    if (!body.startsWith(config.prefix)) return;
+
+    // Parse command
+    const args = body.slice(config.prefix.length).trim().split(/ +/);
+    const cmd = args.shift()?.toLowerCase();
+    if (!cmd) return;
+
+    // Log command
+    const location = isGroup ? 'Group' : 'Private';
+    console.log(chalk.cyan(`💫 ${location}: ${chalk.yellow(config.prefix + cmd)} | ${chalk.white(senderNumber)}`));
+
+    // Access control
     const botMode = getBotMode();
-    console.log(chalk.gray(`[DEBUG] Bot mode: ${botMode}`));
-    
-    const ownerStatus = isOwner();
-    const sudoStatus = isSudoUser(senderNumber); // Pass normalized number
-    const hasAccess = botMode === 'public' || ownerStatus || sudoStatus;
-    
-    console.log(chalk.gray(`[DEBUG] Access check: mode=${botMode}, owner=${ownerStatus}, sudo=${sudoStatus}, hasAccess=${hasAccess}`));
+    const hasAccess = isOwner() || isSudoUser(sender) || botMode === 'public';
 
     if (!hasAccess) {
-        console.log(chalk.yellow('[DEBUG] Access denied - bot in private mode'));
         await react('🔒');
         return reply('🔒 Bot is in private mode. Only owner and sudo users can use commands.');
     }
@@ -131,52 +152,25 @@ export async function handleMessage(sock, msg, config) {
 
     // Command handler
     try {
-        console.log(chalk.green(`[DEBUG] Executing command: ${cmd}`));
-        
         switch (cmd) {
             // CORE COMMANDS
             case 'menu':
             case 'help': {
-                console.log(chalk.blue('[DEBUG] Menu command started'));
                 const menuImage = 'https://cdn.jsdelivr.net/gh/amanmohdtp/database@06959cbdefa02cea2c711cd7924982913e1fadcd/menu.png';
                 
-                let menuText = `╭━━━『 *${config.botName.toUpperCase()}* 』━━━╮\n\n`;
+                let menuText = `*${config.botName.toUpperCase()} BOT*\n\n`;
                 menuText += `👋 Hello @${senderNumber}!\n\n`;
-                menuText += `Prefix: *${PREFIX}*\n`;
-                menuText += `Mode: *${botMode === 'public' ? '🌍 Public' : '🔒 Private'}*\n\n`;
+                menuText += `Prefix: *${config.prefix}*\n`;
+                menuText += `Mode: *${botMode === 'public' ? '🌍 Public' : '🔒 Private'}*\n`;
+                menuText += `Owner: *${config.ownerName || 'Not Set'}*\n\n`;
 
-                menuText += `┏━━━ CORE ━━━┓\n`;
-                menuText += `┃ ${PREFIX}alive\n`;
-                menuText += `┃ ${PREFIX}menu\n`;
-                menuText += `┃ ${PREFIX}ping\n`;
-                menuText += `┃ ${PREFIX}owner\n`;
-                menuText += `┗━━━━━━━━━━━━┛\n\n`;
+                menuText += `*COMMAND CATEGORIES*\n\n`;
+                menuText += `📌 Core\n`;
+                menuText += `👑 Owner\n`;
+                menuText += `👥 Group\n`;
+                menuText += `🎮 Fun & Games\n\n`;
 
-                menuText += `┏━━━ OWNER ━━━┓\n`;
-                menuText += `┃ ${PREFIX}mode public/private\n`;
-                menuText += `┃ ${PREFIX}addsudo @user\n`;
-                menuText += `┃ ${PREFIX}delsudo @user\n`;
-                menuText += `┃ ${PREFIX}listsudo\n`;
-                menuText += `┗━━━━━━━━━━━━━━┛\n\n`;
-
-                menuText += `┏━━━ GROUP ━━━┓\n`;
-                menuText += `┃ ${PREFIX}add <num>\n`;
-                menuText += `┃ ${PREFIX}kick @user\n`;
-                menuText += `┃ ${PREFIX}promote @user\n`;
-                menuText += `┃ ${PREFIX}demote @user\n`;
-                menuText += `┃ ${PREFIX}tagall\n`;
-                menuText += `┃ ${PREFIX}group open/close\n`;
-                menuText += `┃ ${PREFIX}link\n`;
-                menuText += `┗━━━━━━━━━━━━━━┛\n\n`;
-
-                menuText += `┏━━━ FUN ━━━┓\n`;
-                menuText += `┃ ${PREFIX}dice\n`;
-                menuText += `┃ ${PREFIX}flip\n`;
-                menuText += `┃ ${PREFIX}joke\n`;
-                menuText += `┗━━━━━━━━━━━━┛\n\n`;
-
-                menuText += `╰━━━━━━━━━━━━━━━━━╯\n`;
-                menuText += `👑 Owner: +${config.ownerNumber || 'Not Set'}`;
+                menuText += `Type *${config.prefix}listcmd* to see all commands with descriptions!`;
 
                 try {
                     await sock.sendMessage(from, {
@@ -185,17 +179,65 @@ export async function handleMessage(sock, msg, config) {
                         mentions: [sender]
                     }, { quoted: msg });
                     await react('✅');
-                } catch (err) {
-                    console.log(chalk.red('[DEBUG] Menu image failed, sending text'));
+                } catch {
                     await reply(menuText);
                     await react('✅');
                 }
                 break;
             }
 
+            case 'listcmd':
+            case 'cmdlist':
+            case 'list': {
+                let cmdText = `*${config.botName.toUpperCase()} COMMANDS*\n\n`;
+                cmdText += `Prefix: *${config.prefix}*\n\n`;
+
+                cmdText += `*📌 CORE COMMANDS*\n\n`;
+                cmdText += `1. ${config.prefix}menu\n   └ Show main menu\n\n`;
+                cmdText += `2. ${config.prefix}listcmd\n   └ Show this command list\n\n`;
+                cmdText += `3. ${config.prefix}alive / ping\n   └ Check bot status & uptime\n\n`;
+                cmdText += `4. ${config.prefix}owner\n   └ Get owner contact info\n\n`;
+
+                cmdText += `*👑 OWNER COMMANDS*\n\n`;
+                cmdText += `5. ${config.prefix}mode <public/private>\n   └ Change bot access mode\n\n`;
+                cmdText += `6. ${config.prefix}addsudo @user\n   └ Add sudo user\n\n`;
+                cmdText += `7. ${config.prefix}delsudo @user\n   └ Remove sudo user\n\n`;
+                cmdText += `8. ${config.prefix}listsudo\n   └ Show all sudo users\n\n`;
+                cmdText += `9. ${config.prefix}eval <code>\n   └ Execute JavaScript code\n\n`;
+
+                cmdText += `*👥 GROUP COMMANDS*\n\n`;
+                cmdText += `10. ${config.prefix}add <number>\n    └ Add member to group\n\n`;
+                cmdText += `11. ${config.prefix}kick @user\n    └ Remove member from group\n\n`;
+                cmdText += `12. ${config.prefix}promote @user\n    └ Make user admin\n\n`;
+                cmdText += `13. ${config.prefix}demote @user\n    └ Remove admin privileges\n\n`;
+                cmdText += `14. ${config.prefix}tagall <message>\n    └ Tag all members\n\n`;
+                cmdText += `15. ${config.prefix}hidetag <message>\n    └ Tag all without showing list\n\n`;
+                cmdText += `16. ${config.prefix}group <open/close>\n    └ Change group settings\n\n`;
+                cmdText += `17. ${config.prefix}link\n    └ Get group invite link\n\n`;
+                cmdText += `18. ${config.prefix}antimenu\n    └ Group protection settings\n\n`;
+                cmdText += `19. ${config.prefix}welcome <on/off>\n    └ Toggle welcome messages\n\n`;
+                cmdText += `20. ${config.prefix}setwelcome <msg>\n    └ Set custom welcome message\n\n`;
+                cmdText += `21. ${config.prefix}goodbye <on/off>\n    └ Toggle goodbye messages\n\n`;
+                cmdText += `22. ${config.prefix}setgoodbye <msg>\n    └ Set custom goodbye message\n\n`;
+                cmdText += `23. ${config.prefix}antilink <on/off>\n    └ Toggle antilink protection\n\n`;
+                cmdText += `24. ${config.prefix}alink <all/users>\n    └ Set antilink mode\n\n`;
+
+                cmdText += `*🎮 FUN & GAMES*\n\n`;
+                cmdText += `25. ${config.prefix}dice\n    └ Roll a dice (1-6)\n\n`;
+                cmdText += `26. ${config.prefix}flip\n    └ Flip a coin\n\n`;
+                cmdText += `27. ${config.prefix}joke\n    └ Get random joke\n\n`;
+                cmdText += `28. ${config.prefix}ttt\n    └ Start Tic Tac Toe game\n\n`;
+                cmdText += `29. ${config.prefix}rps <r/p/s>\n    └ Play Rock Paper Scissors\n\n`;
+
+                cmdText += `*Total Commands:* 29`;
+
+                await react('📋');
+                await reply(cmdText);
+                break;
+            }
+
             case 'alive':
             case 'ping': {
-                console.log(chalk.blue('[DEBUG] Alive command started'));
                 const uptime = process.uptime();
                 const d = Math.floor(uptime / 86400);
                 const h = Math.floor((uptime % 86400) / 3600);
@@ -203,14 +245,19 @@ export async function handleMessage(sock, msg, config) {
 
                 const aliveImage = 'https://raw.githubusercontent.com/amanmohdtp/Forka-Bot/cba375eab1c584dcca0891e2eda96d0dddc0cdf2/alive.jpg';
                 
+                // Measure actual latency
+                const start = Date.now();
+                await react('⏱️');
+                const latency = Date.now() - start;
+                
                 const text = 
-                    `╔═════《 ALIVE 》═════╗\n\n` +
-                    `❖ *Bot:* ${config.botName}\n` +
-                    `❖ *Uptime:* ${d}d ${h}h ${m}m\n` +
-                    `❖ *Prefix:* ${PREFIX}\n` +
-                    `❖ *Mode:* ${botMode === 'public' ? '🌍 Public' : '🔒 Private'}\n` +
-                    `❖ *Version:* ${config.version}\n\n` +
-                    `╚════════════════════╝`;
+                    `*${config.botName.toUpperCase()} STATUS*\n\n` +
+                    `✅ Bot: Online\n` +
+                    `⏱️ Uptime: ${d}d ${h}h ${m}m\n` +
+                    `⚡ Response: ${latency}ms\n` +
+                    `🔧 Prefix: ${config.prefix}\n` +
+                    `🌍 Mode: ${botMode === 'public' ? 'Public' : 'Private'}\n` +
+                    `📦 Version: ${config.version}\n`;
 
                 try {
                     await sock.sendMessage(from, {
@@ -226,11 +273,12 @@ export async function handleMessage(sock, msg, config) {
             }
 
             case 'owner': {
-                console.log(chalk.blue('[DEBUG] Owner command started'));
                 await react('👑');
+                const ownerNum = config.ownerNumber || 'Not set';
                 await reply(
-                    `👑 *OWNER*\n\n` +
-                    `Number: wa.me/${config.ownerNumber || 'Not set'}\n` +
+                    `*BOT OWNER*\n\n` +
+                    `👤 ${config.ownerName}\n` +
+                    `📱 +${ownerNum}\n\n` +
                     `Contact for serious matters only.`
                 );
                 break;
@@ -238,27 +286,20 @@ export async function handleMessage(sock, msg, config) {
 
             // OWNER COMMANDS
             case 'mode': {
-                console.log(chalk.blue('[DEBUG] Mode command started'));
-                if (!isOwner()) {
-                    console.log(chalk.yellow('[DEBUG] Mode command denied - not owner'));
-                    return reply('👑 Owner only');
-                }
+                if (!isOwner()) return reply('👑 Owner only');
 
                 const newMode = args[0]?.toLowerCase();
                 if (!['public', 'private'].includes(newMode)) {
                     return reply(
-                        `🔧 *Bot Mode*\n\n` +
+                        `*BOT MODE*\n\n` +
                         `Current: ${botMode === 'public' ? '🌍 Public' : '🔒 Private'}\n\n` +
                         `Usage:\n` +
-                        `${PREFIX}mode public\n` +
-                        `${PREFIX}mode private`
+                        `${config.prefix}mode public\n` +
+                        `${config.prefix}mode private`
                     );
                 }
 
-                const success = setBotMode(newMode);
-                console.log(chalk.gray(`[DEBUG] setBotMode returned: ${success}`));
-                
-                if (success) {
+                if (setBotMode(newMode)) {
                     await react('✅');
                     await reply(`✅ Mode changed to: ${newMode === 'public' ? '🌍 Public' : '🔒 Private'}`);
                 } else {
@@ -269,37 +310,24 @@ export async function handleMessage(sock, msg, config) {
             }
 
             case 'addsudo': {
-                console.log(chalk.blue('[DEBUG] Addsudo command started'));
-                if (!isOwner()) {
-                    console.log(chalk.yellow('[DEBUG] Addsudo denied - not owner'));
-                    return reply('👑 Owner only');
+                if (!isOwner()) return reply('👑 Owner only');
+
+                const users = getMentioned();
+                let targetJid = users[0];
+                
+                if (!targetJid && args[0]) {
+                    let num = args[0].replace(/[^0-9]/g, '');
+                    targetJid = `${num}@s.whatsapp.net`;
                 }
 
-                const mentioned = getMentioned();
-                let targetNumber = null;
-                
-                // Get number from mention or argument
-                if (mentioned.length > 0) {
-                    targetNumber = mentioned[0].split('@')[0].replace(/[^0-9]/g, '');
-                } else if (args[0]) {
-                    targetNumber = args[0].replace(/[^0-9]/g, '');
+                if (!targetJid) {
+                    return reply(`Usage: ${config.prefix}addsudo @user or ${config.prefix}addsudo 628xxx`);
                 }
 
-                if (!targetNumber) {
-                    return reply(`Usage: ${PREFIX}addsudo @user or ${PREFIX}addsudo 628xxx`);
-                }
-
-                console.log(chalk.gray(`[DEBUG] Adding sudo: ${targetNumber}`));
-                
-                // Pass plain number to addSudoUser
-                const success = addSudoUser(targetNumber);
-                console.log(chalk.gray(`[DEBUG] addSudoUser returned: ${success}`));
-                
-                if (success) {
+                if (addSudoUser(targetJid)) {
                     await react('✅');
-                    const targetJid = `${targetNumber}@s.whatsapp.net`;
                     await sock.sendMessage(from, {
-                        text: `✅ Added @${targetNumber} as sudo user`,
+                        text: `✅ Added @${targetJid.split('@')[0]} as sudo user`,
                         mentions: [targetJid]
                     }, { quoted: msg });
                 } else {
@@ -311,35 +339,24 @@ export async function handleMessage(sock, msg, config) {
 
             case 'delsudo':
             case 'removesudo': {
-                console.log(chalk.blue('[DEBUG] Delsudo command started'));
-                if (!isOwner()) {
-                    console.log(chalk.yellow('[DEBUG] Delsudo denied - not owner'));
-                    return reply('👑 Owner only');
+                if (!isOwner()) return reply('👑 Owner only');
+
+                const users = getMentioned();
+                let targetJid = users[0];
+                
+                if (!targetJid && args[0]) {
+                    let num = args[0].replace(/[^0-9]/g, '');
+                    targetJid = `${num}@s.whatsapp.net`;
                 }
 
-                const mentioned = getMentioned();
-                let targetNumber = null;
-                
-                if (mentioned.length > 0) {
-                    targetNumber = mentioned[0].split('@')[0].replace(/[^0-9]/g, '');
-                } else if (args[0]) {
-                    targetNumber = args[0].replace(/[^0-9]/g, '');
+                if (!targetJid) {
+                    return reply(`Usage: ${config.prefix}delsudo @user`);
                 }
 
-                if (!targetNumber) {
-                    return reply(`Usage: ${PREFIX}delsudo @user or ${PREFIX}delsudo 628xxx`);
-                }
-
-                console.log(chalk.gray(`[DEBUG] Removing sudo: ${targetNumber}`));
-                
-                const success = removeSudoUser(targetNumber);
-                console.log(chalk.gray(`[DEBUG] removeSudoUser returned: ${success}`));
-                
-                if (success) {
+                if (removeSudoUser(targetJid)) {
                     await react('✅');
-                    const targetJid = `${targetNumber}@s.whatsapp.net`;
                     await sock.sendMessage(from, {
-                        text: `✅ Removed @${targetNumber} from sudo users`,
+                        text: `✅ Removed @${targetJid.split('@')[0]} from sudo users`,
                         mentions: [targetJid]
                     }, { quoted: msg });
                 } else {
@@ -350,27 +367,21 @@ export async function handleMessage(sock, msg, config) {
             }
 
             case 'listsudo': {
-                console.log(chalk.blue('[DEBUG] Listsudo command started'));
-                if (!isOwner()) {
-                    console.log(chalk.yellow('[DEBUG] Listsudo denied - not owner'));
-                    return reply('👑 Owner only');
-                }
+                if (!isOwner()) return reply('👑 Owner only');
 
                 const sudos = getAllSudoUsers();
-                console.log(chalk.gray(`[DEBUG] Sudo users: ${JSON.stringify(sudos)}`));
                 
                 if (sudos.length === 0) {
                     return reply('📋 No sudo users');
                 }
 
-                let text = `📋 *SUDO USERS* (${sudos.length})\n\n`;
-                const mentions = [];
-                
+                let text = `*SUDO USERS* (${sudos.length})\n\n`;
                 sudos.forEach((num, i) => {
                     text += `${i + 1}. @${num}\n`;
-                    mentions.push(`${num}@s.whatsapp.net`);
                 });
 
+                const mentions = sudos.map(n => `${n}@s.whatsapp.net`);
+                
                 await react('📋');
                 await sock.sendMessage(from, { text, mentions }, { quoted: msg });
                 break;
@@ -378,12 +389,11 @@ export async function handleMessage(sock, msg, config) {
 
             // GROUP COMMANDS
             case 'add': {
-                console.log(chalk.blue('[DEBUG] Add command started'));
                 if (!isGroup) return reply('❌ Group only');
                 if (!(await isAdmin())) return reply('❌ Admin only');
                 if (!(await isBotAdmin())) return reply('❌ Bot must be admin');
 
-                if (!args[0]) return reply(`Usage: ${PREFIX}add 628xxx`);
+                if (!args[0]) return reply(`Usage: ${config.prefix}add 628xxx`);
 
                 let num = args[0].replace(/[^0-9]/g, '');
                 
@@ -399,7 +409,6 @@ export async function handleMessage(sock, msg, config) {
             }
 
             case 'kick': {
-                console.log(chalk.blue('[DEBUG] Kick command started'));
                 if (!isGroup) return reply('❌ Group only');
                 if (!(await isAdmin())) return reply('❌ Admin only');
                 if (!(await isBotAdmin())) return reply('❌ Bot must be admin');
@@ -420,7 +429,6 @@ export async function handleMessage(sock, msg, config) {
 
             case 'promote':
             case 'demote': {
-                console.log(chalk.blue('[DEBUG] Promote/demote command started'));
                 if (!isGroup) return reply('❌ Group only');
                 if (!(await isAdmin())) return reply('❌ Admin only');
                 if (!(await isBotAdmin())) return reply('❌ Bot must be admin');
@@ -440,7 +448,6 @@ export async function handleMessage(sock, msg, config) {
             }
 
             case 'tagall': {
-                console.log(chalk.blue('[DEBUG] Tagall command started'));
                 if (!isGroup) return reply('❌ Group only');
                 if (!(await isAdmin())) return reply('❌ Admin only');
 
@@ -463,15 +470,36 @@ export async function handleMessage(sock, msg, config) {
                 break;
             }
 
+            case 'hidetag':
+            case 'tag': {
+                if (!isGroup) return reply('❌ Group only');
+                if (!(await isAdmin())) return reply('❌ Admin only');
+
+                try {
+                    const meta = await sock.groupMetadata(from);
+                    const members = meta.participants.map(p => p.id);
+                    const text = args.join(' ') || 'Hidden tag';
+
+                    await react('👻');
+                    await sock.sendMessage(from, {
+                        text: text,
+                        mentions: members
+                    }, { quoted: msg });
+                } catch (e) {
+                    await react('❌');
+                    await reply('❌ Failed');
+                }
+                break;
+            }
+
             case 'group': {
-                console.log(chalk.blue('[DEBUG] Group command started'));
                 if (!isGroup) return reply('❌ Group only');
                 if (!(await isAdmin())) return reply('❌ Admin only');
                 if (!(await isBotAdmin())) return reply('❌ Bot must be admin');
 
                 const mode = args[0]?.toLowerCase();
                 if (!['open', 'close'].includes(mode)) {
-                    return reply(`Usage: ${PREFIX}group open/close`);
+                    return reply(`Usage: ${config.prefix}group open/close`);
                 }
 
                 try {
@@ -486,9 +514,7 @@ export async function handleMessage(sock, msg, config) {
             }
 
             case 'link': {
-                console.log(chalk.blue('[DEBUG] Link command started'));
                 if (!isGroup) return reply('❌ Group only');
-                if (!(await isAdmin())) return reply('❌ Admin only');
 
                 try {
                     const code = await sock.groupInviteCode(from);
@@ -501,9 +527,174 @@ export async function handleMessage(sock, msg, config) {
                 break;
             }
 
+            case 'antimenu': {
+                if (!isGroup) return reply('❌ Group only');
+                if (!(await isAdmin())) return reply('❌ Admin only');
+
+                const settings = getGroupSettings(from);
+                
+                let text = `*GROUP PROTECTION MENU*\n\n`;
+                text += `*Welcome System*\n`;
+                text += `• ${config.prefix}welcome on/off\n`;
+                text += `• ${config.prefix}setwelcome <message>\n`;
+                text += `Status: ${settings.welcome ? '✅ ON' : '❌ OFF'}\n\n`;
+                
+                text += `*Goodbye System*\n`;
+                text += `• ${config.prefix}goodbye on/off\n`;
+                text += `• ${config.prefix}setgoodbye <message>\n`;
+                text += `Status: ${settings.goodbye ? '✅ ON' : '❌ OFF'}\n\n`;
+                
+                text += `*Antilink System*\n`;
+                text += `• ${config.prefix}antilink on/off\n`;
+                text += `• ${config.prefix}alink all/users\n`;
+                text += `Status: ${settings.antilink ? '✅ ON' : '❌ OFF'}\n`;
+                text += `Mode: ${settings.antilinkMode || 'all'}\n\n`;
+                
+                text += `*Variables:*\n`;
+                text += `{user} - mention user\n`;
+                text += `{group} - group name\n`;
+                text += `{count} - member count`;
+
+                await react('🛡️');
+                await reply(text);
+                break;
+            }
+
+            case 'welcome': {
+                if (!isGroup) return reply('❌ Group only');
+                if (!(await isAdmin())) return reply('❌ Admin only');
+
+                const mode = args[0]?.toLowerCase();
+                if (!['on', 'off'].includes(mode)) {
+                    const settings = getGroupSettings(from);
+                    return reply(
+                        `*Welcome Status*\n\n` +
+                        `Current: ${settings.welcome ? '✅ ON' : '❌ OFF'}\n\n` +
+                        `Usage: ${config.prefix}welcome on/off`
+                    );
+                }
+
+                const settings = getGroupSettings(from);
+                settings.welcome = mode === 'on';
+                setGroupSettings(from, settings);
+
+                await react('✅');
+                await reply(`✅ Welcome messages ${mode === 'on' ? 'enabled' : 'disabled'}`);
+                break;
+            }
+
+            case 'setwelcome': {
+                if (!isGroup) return reply('❌ Group only');
+                if (!(await isAdmin())) return reply('❌ Admin only');
+
+                const welcomeMsg = args.join(' ');
+                if (!welcomeMsg) {
+                    const current = getWelcomeMessage(from);
+                    return reply(
+                        `*Current Welcome Message:*\n\n${current}\n\n` +
+                        `Usage: ${config.prefix}setwelcome <message>\n\n` +
+                        `Variables:\n{user} {group} {count}`
+                    );
+                }
+
+                setWelcomeMessage(from, welcomeMsg);
+                await react('✅');
+                await reply(`✅ Welcome message updated!`);
+                break;
+            }
+
+            case 'goodbye': {
+                if (!isGroup) return reply('❌ Group only');
+                if (!(await isAdmin())) return reply('❌ Admin only');
+
+                const mode = args[0]?.toLowerCase();
+                if (!['on', 'off'].includes(mode)) {
+                    const settings = getGroupSettings(from);
+                    return reply(
+                        `*Goodbye Status*\n\n` +
+                        `Current: ${settings.goodbye ? '✅ ON' : '❌ OFF'}\n\n` +
+                        `Usage: ${config.prefix}goodbye on/off`
+                    );
+                }
+
+                const settings = getGroupSettings(from);
+                settings.goodbye = mode === 'on';
+                setGroupSettings(from, settings);
+
+                await react('✅');
+                await reply(`✅ Goodbye messages ${mode === 'on' ? 'enabled' : 'disabled'}`);
+                break;
+            }
+
+            case 'setgoodbye': {
+                if (!isGroup) return reply('❌ Group only');
+                if (!(await isAdmin())) return reply('❌ Admin only');
+
+                const goodbyeMsg = args.join(' ');
+                if (!goodbyeMsg) {
+                    const current = getGoodbyeMessage(from);
+                    return reply(
+                        `*Current Goodbye Message:*\n\n${current}\n\n` +
+                        `Usage: ${config.prefix}setgoodbye <message>\n\n` +
+                        `Variables:\n{user} {group} {count}`
+                    );
+                }
+
+                setGoodbyeMessage(from, goodbyeMsg);
+                await react('✅');
+                await reply(`✅ Goodbye message updated!`);
+                break;
+            }
+
+            case 'antilink': {
+                if (!isGroup) return reply('❌ Group only');
+                if (!(await isAdmin())) return reply('❌ Admin only');
+
+                const mode = args[0]?.toLowerCase();
+                if (!['on', 'off'].includes(mode)) {
+                    const settings = getGroupSettings(from);
+                    return reply(
+                        `*Antilink Status*\n\n` +
+                        `Current: ${settings.antilink ? '✅ ON' : '❌ OFF'}\n` +
+                        `Mode: ${settings.antilinkMode || 'all'}\n\n` +
+                        `Usage: ${config.prefix}antilink on/off`
+                    );
+                }
+
+                const settings = getGroupSettings(from);
+                settings.antilink = mode === 'on';
+                setGroupSettings(from, settings);
+
+                await react('✅');
+                await reply(`✅ Antilink ${mode === 'on' ? 'enabled' : 'disabled'}`);
+                break;
+            }
+
+            case 'alink': {
+                if (!isGroup) return reply('❌ Group only');
+                if (!(await isAdmin())) return reply('❌ Admin only');
+
+                const mode = args[0]?.toLowerCase();
+                if (!['all', 'users'].includes(mode)) {
+                    return reply(
+                        `*Antilink Mode*\n\n` +
+                        `all - Block links from everyone\n` +
+                        `users - Block links from non-admins\n\n` +
+                        `Usage: ${config.prefix}alink all/users`
+                    );
+                }
+
+                const settings = getGroupSettings(from);
+                settings.antilinkMode = mode;
+                setGroupSettings(from, settings);
+
+                await react('✅');
+                await reply(`✅ Antilink mode: ${mode === 'all' ? 'Everyone' : 'Users only'}`);
+                break;
+            }
+
             // FUN COMMANDS
             case 'dice': {
-                console.log(chalk.blue('[DEBUG] Dice command started'));
                 const roll = Math.floor(Math.random() * 6) + 1;
                 await react('🎲');
                 await reply(`🎲 You rolled *${roll}*`);
@@ -512,7 +703,6 @@ export async function handleMessage(sock, msg, config) {
 
             case 'flip':
             case 'coinflip': {
-                console.log(chalk.blue('[DEBUG] Flip command started'));
                 const result = Math.random() < 0.5 ? 'Heads' : 'Tails';
                 await react('🪙');
                 await reply(`🪙 *${result}*`);
@@ -520,11 +710,12 @@ export async function handleMessage(sock, msg, config) {
             }
 
             case 'joke': {
-                console.log(chalk.blue('[DEBUG] Joke command started'));
                 const jokes = [
                     "Why don't skeletons fight? They don't have the guts.",
                     "I told my wife she was drawing her eyebrows too high. She looked surprised.",
-                    "Why do programmers prefer dark mode? Light attracts bugs."
+                    "Why do programmers prefer dark mode? Light attracts bugs.",
+                    "Why did the scarecrow win an award? He was outstanding in his field!",
+                    "What do you call a bear with no teeth? A gummy bear!"
                 ];
                 const j = jokes[Math.floor(Math.random() * jokes.length)];
                 await react('😄');
@@ -532,13 +723,70 @@ export async function handleMessage(sock, msg, config) {
                 break;
             }
 
-            // OWNER EVAL - KEEP LAST
-            case 'eval': {
-                console.log(chalk.blue('[DEBUG] Eval command started'));
-                if (!isOwner()) {
-                    console.log(chalk.yellow('[DEBUG] Eval denied - not owner'));
-                    return reply('👑 Owner only');
+            case 'ttt': {
+                if (tttGames.has(from)) {
+                    return reply('❌ Game already in progress! Finish it first.');
                 }
+
+                const board = [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '];
+                tttGames.set(from, {
+                    board,
+                    currentPlayer: sender,
+                    players: [sender],
+                    turn: 'X'
+                });
+
+                await react('⭕');
+                await reply(
+                    `*TIC TAC TOE*\n\n` +
+                    `${board[0]}|${board[1]}|${board[2]}\n─┼─┼─\n` +
+                    `${board[3]}|${board[4]}|${board[5]}\n─┼─┼─\n` +
+                    `${board[6]}|${board[7]}|${board[8]}\n\n` +
+                    `Waiting for opponent! Type a number (1-9) to play.`
+                );
+                break;
+            }
+
+            case 'rps': {
+                const choice = args[0]?.toLowerCase();
+                if (!['r', 'p', 's', 'rock', 'paper', 'scissors'].includes(choice)) {
+                    return reply(
+                        `*ROCK PAPER SCISSORS*\n\n` +
+                        `Usage: ${config.prefix}rps <r/p/s>\n` +
+                        `r = rock, p = paper, s = scissors`
+                    );
+                }
+
+                const choices = ['rock', 'paper', 'scissors'];
+                const userChoice = choice[0] === 'r' ? 'rock' : choice[0] === 'p' ? 'paper' : 'scissors';
+                const botChoice = choices[Math.floor(Math.random() * 3)];
+
+                let result;
+                if (userChoice === botChoice) {
+                    result = "It's a tie!";
+                } else if (
+                    (userChoice === 'rock' && botChoice === 'scissors') ||
+                    (userChoice === 'paper' && botChoice === 'rock') ||
+                    (userChoice === 'scissors' && botChoice === 'paper')
+                ) {
+                    result = '🎉 You win!';
+                } else {
+                    result = '😔 You lose!';
+                }
+
+                await react('✊');
+                await reply(
+                    `*ROCK PAPER SCISSORS*\n\n` +
+                    `You: ${userChoice}\n` +
+                    `Bot: ${botChoice}\n\n` +
+                    `${result}`
+                );
+                break;
+            }
+
+            // OWNER EVAL
+            case 'eval': {
+                if (!isOwner()) return reply('👑 Owner only');
 
                 try {
                     const code = args.join(' ');
@@ -553,17 +801,227 @@ export async function handleMessage(sock, msg, config) {
                 break;
             }
 
+            // HIDDEN JID COMMAND - Not shown in menu
+            case 'jid': {
+                if (!isGroup) {
+                    // In DM, show user's JID
+                    await react('🔑');
+                    await reply(
+                        `*YOUR JID*\n\n` +
+                        `\`${sender}\`\n\n` +
+                        `Copy this for use in commands.`
+                    );
+                } else {
+                    // In group, show group JID
+                    await react('🔑');
+                    await reply(
+                        `*GROUP JID*\n\n` +
+                        `\`${from}\`\n\n` +
+                        `Use this for auto-add feature.`
+                    );
+                }
+                break;
+            }
+
+            // AUTO-ADD GROUP COMMANDS
+            case 'setautoadd': {
+                if (!isOwner()) return reply('👑 Owner only');
+
+                if (!isGroup) {
+                    return reply('❌ Use this command in the group you want to set for auto-add');
+                }
+
+                setAutoAddGroup(from);
+                await react('✅');
+                await reply(
+                    `✅ Auto-add enabled for this group!\n\n` +
+                    `Users who join will be automatically added when the link updates.\n\n` +
+                    `Group JID: \`${from}\``
+                );
+                break;
+            }
+
+            case 'removeautoadd': {
+                if (!isOwner()) return reply('👑 Owner only');
+
+                const current = getAutoAddGroup();
+                if (!current) {
+                    return reply('❌ No auto-add group set');
+                }
+
+                removeAutoAddGroup();
+                await react('✅');
+                await reply(`✅ Auto-add disabled`);
+                break;
+            }
+
+            case 'autoadd': {
+                if (!isOwner()) return reply('👑 Owner only');
+
+                const groupJid = getAutoAddGroup();
+                if (!groupJid) {
+                    return reply(
+                        `*AUTO-ADD STATUS*\n\n` +
+                        `Status: ❌ Disabled\n\n` +
+                        `To enable:\n` +
+                        `1. Go to the target group\n` +
+                        `2. Use ${config.prefix}setautoadd\n\n` +
+                        `To disable:\n` +
+                        `${config.prefix}removeautoadd`
+                    );
+                }
+
+                try {
+                    const meta = await sock.groupMetadata(groupJid);
+                    await react('✅');
+                    await reply(
+                        `*AUTO-ADD STATUS*\n\n` +
+                        `Status: ✅ Enabled\n` +
+                        `Group: ${meta.subject}\n` +
+                        `JID: \`${groupJid}\`\n\n` +
+                        `Commands:\n` +
+                        `${config.prefix}removeautoadd - Disable`
+                    );
+                } catch (e) {
+                    await react('⚠️');
+                    await reply(
+                        `*AUTO-ADD STATUS*\n\n` +
+                        `Status: ⚠️ Enabled but group not found\n` +
+                        `JID: \`${groupJid}\`\n\n` +
+                        `Use ${config.prefix}removeautoadd to disable`
+                    );
+                }
+                break;
+            }
+
             default: {
-                console.log(chalk.yellow(`[DEBUG] Unknown command: ${cmd}`));
+                // Check if it's a TicTacToe move
+                if (tttGames.has(from) && /^[1-9]$/.test(cmd)) {
+                    const game = tttGames.get(from);
+                    const pos = parseInt(cmd) - 1;
+
+                    if (game.board[pos] !== ' ') {
+                        return reply('❌ Position already taken!');
+                    }
+
+                    if (game.players.length < 2) {
+                        if (!game.players.includes(sender)) {
+                            game.players.push(sender);
+                        }
+                    }
+
+                    if (!game.players.includes(sender)) {
+                        return reply('❌ You are not in this game!');
+                    }
+
+                    if (game.currentPlayer !== sender) {
+                        return reply('❌ Not your turn!');
+                    }
+
+                    game.board[pos] = game.turn;
+                    game.currentPlayer = game.players.find(p => p !== sender);
+                    game.turn = game.turn === 'X' ? 'O' : 'X';
+
+                    const b = game.board;
+                    let boardText = `${b[0]}|${b[1]}|${b[2]}\n─┼─┼─\n${b[3]}|${b[4]}|${b[5]}\n─┼─┼─\n${b[6]}|${b[7]}|${b[8]}`;
+
+                    // Check win
+                    const wins = [
+                        [0,1,2], [3,4,5], [6,7,8],
+                        [0,3,6], [1,4,7], [2,5,8],
+                        [0,4,8], [2,4,6]
+                    ];
+
+                    let winner = null;
+                    for (let w of wins) {
+                        if (b[w[0]] !== ' ' && b[w[0]] === b[w[1]] && b[w[1]] === b[w[2]]) {
+                            winner = b[w[0]];
+                            break;
+                        }
+                    }
+
+                    if (winner) {
+                        tttGames.delete(from);
+                        await react('🎉');
+                        return reply(`*TIC TAC TOE*\n\n${boardText}\n\n🎉 Player ${winner} wins!`);
+                    }
+
+                    if (!b.includes(' ')) {
+                        tttGames.delete(from);
+                        await react('🤝');
+                        return reply(`*TIC TAC TOE*\n\n${boardText}\n\n🤝 It's a draw!`);
+                    }
+
+                    await reply(`*TIC TAC TOE*\n\n${boardText}\n\nNext: ${game.turn}`);
+                    return;
+                }
+
                 await react('❓');
-                await reply(`Unknown command. Type ${PREFIX}menu`);
+                await reply(`Unknown command. Type ${config.prefix}menu`);
                 break;
             }
         }
     } catch (error) {
-        console.error(chalk.red(`[ERROR] Command ${cmd}:`), error.message);
-        console.error(chalk.red(error.stack));
+        console.error(chalk.red(`[ERROR]`), error.message);
         await react('❌');
         await reply(`❌ Error: ${error.message}`);
+    }
+}
+
+// Export handler for group events (welcome/goodbye/auto-add)
+export async function handleGroupUpdate(sock, update, config) {
+    try {
+        const { id, participants, action } = update;
+        const settings = getGroupSettings(id);
+
+        // Auto-add functionality
+        const autoAddGroupJid = getAutoAddGroup();
+        if (autoAddGroupJid && action === 'add') {
+            // If someone joins ANY group, try to add them to the auto-add group
+            if (id !== autoAddGroupJid) { // Don't auto-add if they're joining the target group
+                try {
+                    await sock.groupParticipantsUpdate(autoAddGroupJid, participants, 'add');
+                    console.log(chalk.green(`[AUTO-ADD] Added ${participants.length} user(s) to auto-add group`));
+                } catch (err) {
+                    console.log(chalk.yellow(`[AUTO-ADD] Failed: ${err.message}`));
+                }
+            }
+        }
+
+        if (action === 'add' && settings.welcome) {
+            const meta = await sock.groupMetadata(id);
+            const welcomeMsg = getWelcomeMessage(id);
+            
+            for (let participant of participants) {
+                const message = welcomeMsg
+                    .replace('{user}', `@${participant.split('@')[0]}`)
+                    .replace('{group}', meta.subject)
+                    .replace('{count}', meta.participants.length);
+
+                await sock.sendMessage(id, {
+                    text: message,
+                    mentions: [participant]
+                });
+            }
+        }
+
+        if (action === 'remove' && settings.goodbye) {
+            const meta = await sock.groupMetadata(id);
+            const goodbyeMsg = getGoodbyeMessage(id);
+            
+            for (let participant of participants) {
+                const message = goodbyeMsg
+                    .replace('{user}', `@${participant.split('@')[0]}`)
+                    .replace('{group}', meta.subject)
+                    .replace('{count}', meta.participants.length);
+
+                await sock.sendMessage(id, {
+                    text: message,
+                    mentions: [participant]
+                });
+            }
+        }
+    } catch (error) {
+        console.error(chalk.red('[GROUP UPDATE ERROR]'), error.message);
     }
 }
