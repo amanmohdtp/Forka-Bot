@@ -68,8 +68,7 @@ Set these environment variables in your hosting dashboard:
 🎮 Core Features
 
 - 🔑 Pairing Code: Link via phone number instead of QR.  
-- 👥 Admin Tools: Add, kick, promote/demote, tag-all, group settings.  
-- 🎲 Games: Tic Tac Toe, Rock–Paper–Scissors, Dice, Coin Flip, Guess Number.  
+- 👥 Admin Tools: Add, kick, promote/demote, tag-all, group settings and more
 - ⚡ Reliability: Auto-reconnect with optional keep-alive server.  
 - 🛡️ Security: Rate limiting, admin checks, and safe command handling.  
 
