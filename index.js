@@ -69,7 +69,8 @@ async function startBot() {
   botState.sock = sock;
 
   sock.ev.on('creds.update', saveCreds);
-sock.ev.on('connection.update', async (update) => {
+
+  sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
 
     if (connection === 'connecting' && !state.creds.registered && !pairingCodeSent) {
@@ -144,7 +145,6 @@ sock.ev.on('connection.update', async (update) => {
       console.log(chalk.white(`🔧 Prefix: ${config.prefix}`));
       console.log(chalk.white(`👤 Owner: ${config.ownerNumber || 'Not Set'}\n`));
 
-      // Generate or load session ID
       let sessionId;
       if (fs.existsSync(CREDS_FILE)) {
         try {
@@ -153,12 +153,10 @@ sock.ev.on('connection.update', async (update) => {
             sessionId = credsData.SESSION;
           }
         } catch (err) {
-          // Ignore read errors
         }
       }
       
       if (!sessionId) {
-        // Generate new session ID with Forka prefix
         sessionId = 'Forka~' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
         try {
           const credsData = fs.existsSync(CREDS_FILE) 
@@ -173,7 +171,6 @@ sock.ev.on('connection.update', async (update) => {
 
       console.log(chalk.blue(`🔑 Session ID: ${sessionId}\n`));
 
-      // Initialize owner in database - MOVED HERE
       const { initializeOwner } = await import('./database.js');
       initializeOwner(config.ownerNumber);
 
@@ -181,24 +178,20 @@ sock.ev.on('connection.update', async (update) => {
     }
   });
 
-  // Message handler - prevent duplicates and work everywhere
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
 
     const msg = messages[0];
     if (!msg?.message) return;
     
-    // Skip status broadcasts
     if (msg.key.remoteJid === 'status@broadcast') return;
 
-    // Prevent duplicate processing
     const msgId = msg.key.id;
     if (global.processedMessages?.has(msgId)) return;
     
     if (!global.processedMessages) global.processedMessages = new Set();
     global.processedMessages.add(msgId);
     
-    // Clean old messages (keep only last 100)
     if (global.processedMessages.size > 100) {
       const arr = Array.from(global.processedMessages);
       global.processedMessages = new Set(arr.slice(-100));
@@ -212,7 +205,6 @@ sock.ev.on('connection.update', async (update) => {
       ''
     ).trim();
 
-    // Process all messages that start with prefix (DM, Group, Self)
     if (!body || !body.startsWith(config.prefix)) return;
 
     try {
@@ -222,7 +214,6 @@ sock.ev.on('connection.update', async (update) => {
     }
   });
 
-  // Group participant updates (welcome/goodbye/auto-add)
   sock.ev.on('group-participants.update', async (update) => {
     try {
       await handleGroupUpdate(sock, update, config);
@@ -239,7 +230,7 @@ async function sendWelcomeMessage(sock, sessionId) {
 
   const botNumber = sock.user.id.split(':')[0];
   const ownerJid = config.ownerNumber
-    ? config.ownerNumber.replace(/[^0-9]/g, '') + '@s.whatsapp.net'
+    ? config.ownerNumber.split(',')[0].replace(/[^0-9]/g, '') + '@s.whatsapp.net'
     : botNumber + '@s.whatsapp.net';
 
   const menuImage = 'https://cdn.jsdelivr.net/gh/amanmohdtp/database@06959cbdefa02cea2c711cd7924982913e1fadcd/menu.png';
@@ -249,7 +240,7 @@ async function sendWelcomeMessage(sock, sessionId) {
     `Status: Active & Ready\n` +
     `Number: +${botNumber}\n` +
     `Prefix: ${config.prefix}\n` +
-    `Owner: ${config.ownerNumber ? '+' + config.ownerNumber : 'Not set'}\n` +
+    `Owner: ${config.ownerNumber ? '+' + config.ownerNumber.split(',')[0] : 'Not set'}\n` +
     `Version: ${config.version}\n` +
     `🔑 Session: \`${sessionId}\`\n` +
     `⏰ Connected: ${new Date().toLocaleString()}\n\n` +

@@ -1,23 +1,28 @@
 import chalk from 'chalk';
-import { getGroupSettings, isSudoUser, getBotMode } from './database.js';
+import { jidDecode } from '@whiskeysockets/baileys';
+import { getGroupSettings, isSudoUser, getBotMode, setGroupSettings, getWelcomeMessage, setWelcomeMessage, getGoodbyeMessage, setGoodbyeMessage } from './database.js';
 
 const commands = new Map();
 const cooldowns = new Map();
 
-// Helper to get sender number
-function getSenderNumber(msg) {
-  const sender = msg.key.participant || msg.key.remoteJid;
-  return sender.split('@')[0];
+function jidToNumber(jid) {
+  const decoded = jidDecode(jid);
+  return decoded?.user || jid.split('@')[0];
 }
 
-// Helper to check if user is owner
 function isOwner(msg, config) {
-  const senderNumber = getSenderNumber(msg);
-  const ownerNumber = config.ownerNumber.replace(/[^0-9]/g, '');
-  return senderNumber === ownerNumber;
+  const senderJid = msg.key.participant || msg.key.remoteJid;
+  const senderNumber = jidToNumber(senderJid);
+  const ownerNumbers = config.ownerNumber.split(',').map(n => n.trim().replace(/[^0-9]/g, ''));
+  return ownerNumbers.includes(senderNumber);
 }
 
-// Helper to check if user is admin
+function isSudoOrOwner(msg, config) {
+  if (isOwner(msg, config)) return true;
+  const senderJid = msg.key.participant || msg.key.remoteJid;
+  return isSudoUser(senderJid);
+}
+
 async function isAdmin(sock, groupJid, userJid) {
   try {
     const groupMetadata = await sock.groupMetadata(groupJid);
@@ -28,7 +33,6 @@ async function isAdmin(sock, groupJid, userJid) {
   }
 }
 
-// Helper to check if bot is admin
 async function isBotAdmin(sock, groupJid) {
   try {
     const groupMetadata = await sock.groupMetadata(groupJid);
@@ -40,9 +44,7 @@ async function isBotAdmin(sock, groupJid) {
   }
 }
 
-// Load all commands
 function loadCommands() {
-  // CORE COMMANDS
   commands.set('alive', {
     category: 'core',
     execute: async (sock, msg, args, config) => {
@@ -50,7 +52,7 @@ function loadCommands() {
         text: `✅ *${config.botName} is Online!*\n\n` +
               `📱 Number: ${sock.user.id.split(':')[0]}\n` +
               `🔧 Prefix: ${config.prefix}\n` +
-              `👤 Owner: ${config.ownerNumber}\n` +
+              `👤 Owner: ${config.ownerNumber.split(',')[0]}\n` +
               `🎯 Version: ${config.version}`
       });
     }
@@ -73,12 +75,18 @@ function loadCommands() {
   commands.set('owner', {
     category: 'core',
     execute: async (sock, msg, args, config) => {
-      const ownerJid = config.ownerNumber.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+      const ownerNumbers = config.ownerNumber.split(',').map(n => n.trim().replace(/[^0-9]/g, ''));
+      const ownerJids = ownerNumbers.map(num => num + '@s.whatsapp.net');
+      
+      let text = `👑 *Owner Information*\n\n`;
+      text += `Name: ${config.ownerName}\n`;
+      ownerNumbers.forEach((num, i) => {
+        text += `${i === 0 ? 'Main' : 'Co-owner'}: +${num}\n`;
+      });
+      
       await sock.sendMessage(msg.key.remoteJid, {
-        text: `👑 *Owner Information*\n\n` +
-              `Name: ${config.ownerName}\n` +
-              `Number: +${config.ownerNumber}`,
-        mentions: [ownerJid]
+        text,
+        mentions: ownerJids
       });
     }
   });
@@ -93,8 +101,7 @@ function loadCommands() {
       const seconds = Math.floor(uptime % 60);
 
       await sock.sendMessage(msg.key.remoteJid, {
-        text: `⏱️ *Bot Runtime*\n\n` +
-              `${days}d ${hours}h ${minutes}m ${seconds}s`
+        text: `⏱️ *Bot Runtime*\n\n${days}d ${hours}h ${minutes}m ${seconds}s`
       });
     }
   });
@@ -107,15 +114,12 @@ function loadCommands() {
       const responseTime = Date.now() - start;
 
       await sock.sendMessage(msg.key.remoteJid, {
-        text: `⚡ *Speed Test*\n\n` +
-              `Response Time: ${responseTime}ms\n` +
-              `Process Uptime: ${Math.floor(process.uptime())}s`,
+        text: `⚡ *Speed Test*\n\nResponse Time: ${responseTime}ms\nProcess Uptime: ${Math.floor(process.uptime())}s`,
         edit: sent.key
       });
     }
   });
 
-  // OWNER COMMANDS
   commands.set('mode', {
     category: 'owner',
     ownerOnly: true,
@@ -252,7 +256,7 @@ function loadCommands() {
       }
 
       try {
-        const response = await sock.groupAcceptInvite(inviteCode);
+        await sock.groupAcceptInvite(inviteCode);
         await sock.sendMessage(msg.key.remoteJid, {
           text: `✅ Joined group successfully`
         });
@@ -311,7 +315,570 @@ function loadCommands() {
     }
   });
 
-  // MENU COMMAND
+  commands.set('add', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      const botAdmin = await isBotAdmin(sock, groupJid);
+      if (!botAdmin) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Bot needs to be admin'
+        });
+      }
+
+      if (args.length === 0) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Usage: .add 1234567890'
+        });
+      }
+
+      const number = args[0].replace(/[^0-9]/g, '');
+      const userJid = number + '@s.whatsapp.net';
+
+      try {
+        await sock.groupParticipantsUpdate(groupJid, [userJid], 'add');
+        await sock.sendMessage(groupJid, {
+          text: `✅ Added +${number}`,
+          mentions: [userJid]
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to add: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('kick', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      const botAdmin = await isBotAdmin(sock, groupJid);
+      if (!botAdmin) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Bot needs to be admin'
+        });
+      }
+
+      const targetJid = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+      if (!targetJid) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Please mention a user to kick'
+        });
+      }
+
+      try {
+        await sock.groupParticipantsUpdate(groupJid, [targetJid], 'remove');
+        await sock.sendMessage(groupJid, {
+          text: `✅ Kicked user`,
+          mentions: [targetJid]
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to kick: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('promote', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      const botAdmin = await isBotAdmin(sock, groupJid);
+      if (!botAdmin) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Bot needs to be admin'
+        });
+      }
+
+      const targetJid = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+      if (!targetJid) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Please mention a user to promote'
+        });
+      }
+
+      try {
+        await sock.groupParticipantsUpdate(groupJid, [targetJid], 'promote');
+        await sock.sendMessage(groupJid, {
+          text: `✅ Promoted to admin`,
+          mentions: [targetJid]
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to promote: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('demote', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      const botAdmin = await isBotAdmin(sock, groupJid);
+      if (!botAdmin) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Bot needs to be admin'
+        });
+      }
+
+      const targetJid = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+      if (!targetJid) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Please mention a user to demote'
+        });
+      }
+
+      try {
+        await sock.groupParticipantsUpdate(groupJid, [targetJid], 'demote');
+        await sock.sendMessage(groupJid, {
+          text: `✅ Demoted from admin`,
+          mentions: [targetJid]
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to demote: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('tagall', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      try {
+        const groupMetadata = await sock.groupMetadata(groupJid);
+        const participants = groupMetadata.participants;
+        const mentions = participants.map(p => p.id);
+        const message = args.join(' ') || 'Attention everyone!';
+
+        let text = `📢 *Tag All*\n\n${message}\n\n`;
+        participants.forEach((p, i) => {
+          const number = jidToNumber(p.id);
+          text += `${i + 1}. @${number}\n`;
+        });
+
+        await sock.sendMessage(groupJid, {
+          text,
+          mentions
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to tag all: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('hidetag', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      try {
+        const groupMetadata = await sock.groupMetadata(groupJid);
+        const participants = groupMetadata.participants;
+        const mentions = participants.map(p => p.id);
+        const message = args.join(' ') || 'Hidden tag message';
+
+        await sock.sendMessage(groupJid, {
+          text: message,
+          mentions
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to send: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('link', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      const botAdmin = await isBotAdmin(sock, groupJid);
+      if (!botAdmin) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Bot needs to be admin'
+        });
+      }
+
+      try {
+        const inviteCode = await sock.groupInviteCode(groupJid);
+        await sock.sendMessage(groupJid, {
+          text: `🔗 *Group Invite Link*\n\nhttps://chat.whatsapp.com/${inviteCode}`
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to get link: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('revoke', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      const botAdmin = await isBotAdmin(sock, groupJid);
+      if (!botAdmin) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Bot needs to be admin'
+        });
+      }
+
+      try {
+        await sock.groupRevokeInvite(groupJid);
+        await sock.sendMessage(groupJid, {
+          text: `✅ Group link revoked successfully`
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to revoke: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('delete', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      const botAdmin = await isBotAdmin(sock, groupJid);
+      if (!botAdmin) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Bot needs to be admin'
+        });
+      }
+
+      const quotedMsg = msg.message?.extendedTextMessage?.contextInfo;
+      if (!quotedMsg) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Please reply to a message to delete it'
+        });
+      }
+
+      try {
+        await sock.sendMessage(groupJid, {
+          delete: {
+            remoteJid: groupJid,
+            fromMe: false,
+            id: quotedMsg.stanzaId,
+            participant: quotedMsg.participant
+          }
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to delete: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('setname', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      const botAdmin = await isBotAdmin(sock, groupJid);
+      if (!botAdmin) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Bot needs to be admin'
+        });
+      }
+
+      if (args.length === 0) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Usage: .setname <new name>'
+        });
+      }
+
+      const newName = args.join(' ');
+
+      try {
+        await sock.groupUpdateSubject(groupJid, newName);
+        await sock.sendMessage(groupJid, {
+          text: `✅ Group name updated to: ${newName}`
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to update: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('setdesc', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      const botAdmin = await isBotAdmin(sock, groupJid);
+      if (!botAdmin) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Bot needs to be admin'
+        });
+      }
+
+      if (args.length === 0) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Usage: .setdesc <new description>'
+        });
+      }
+
+      const newDesc = args.join(' ');
+
+      try {
+        await sock.groupUpdateDescription(groupJid, newDesc);
+        await sock.sendMessage(groupJid, {
+          text: `✅ Group description updated`
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to update: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('group', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      const botAdmin = await isBotAdmin(sock, groupJid);
+      if (!botAdmin) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Bot needs to be admin'
+        });
+      }
+
+      const action = args[0]?.toLowerCase();
+      if (!['open', 'close'].includes(action)) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Usage: .group open/close'
+        });
+      }
+
+      try {
+        await sock.groupSettingUpdate(groupJid, action === 'close' ? 'announcement' : 'not_announcement');
+        await sock.sendMessage(groupJid, {
+          text: `✅ Group ${action === 'close' ? 'closed' : 'opened'}`
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to update: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('mute', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      const botAdmin = await isBotAdmin(sock, groupJid);
+      if (!botAdmin) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Bot needs to be admin'
+        });
+      }
+
+      try {
+        await sock.groupSettingUpdate(groupJid, 'announcement');
+        await sock.sendMessage(groupJid, {
+          text: `🔇 Group muted - Only admins can send messages`
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to mute: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('unmute', {
+    category: 'admin',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      
+      const botAdmin = await isBotAdmin(sock, groupJid);
+      if (!botAdmin) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Bot needs to be admin'
+        });
+      }
+
+      try {
+        await sock.groupSettingUpdate(groupJid, 'not_announcement');
+        await sock.sendMessage(groupJid, {
+          text: `🔊 Group unmuted - Everyone can send messages`
+        });
+      } catch (error) {
+        await sock.sendMessage(groupJid, {
+          text: `❌ Failed to unmute: ${error.message}`
+        });
+      }
+    }
+  });
+
+  commands.set('welcome', {
+    category: 'protection',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      const action = args[0]?.toLowerCase();
+
+      if (!['on', 'off'].includes(action)) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Usage: .welcome on/off'
+        });
+      }
+
+      const settings = getGroupSettings(groupJid);
+      settings.welcome = action === 'on';
+      setGroupSettings(groupJid, settings);
+
+      await sock.sendMessage(groupJid, {
+        text: `✅ Welcome message ${action === 'on' ? 'enabled' : 'disabled'}`
+      });
+    }
+  });
+
+  commands.set('goodbye', {
+    category: 'protection',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      const action = args[0]?.toLowerCase();
+
+      if (!['on', 'off'].includes(action)) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Usage: .goodbye on/off'
+        });
+      }
+
+      const settings = getGroupSettings(groupJid);
+      settings.goodbye = action === 'on';
+      setGroupSettings(groupJid, settings);
+
+      await sock.sendMessage(groupJid, {
+        text: `✅ Goodbye message ${action === 'on' ? 'enabled' : 'disabled'}`
+      });
+    }
+  });
+
+  commands.set('antilink', {
+    category: 'protection',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+      const action = args[0]?.toLowerCase();
+
+      if (!['on', 'off'].includes(action)) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Usage: .antilink on/off'
+        });
+      }
+
+      const settings = getGroupSettings(groupJid);
+      settings.antilink = action === 'on';
+      setGroupSettings(groupJid, settings);
+
+      await sock.sendMessage(groupJid, {
+        text: `✅ Antilink ${action === 'on' ? 'enabled' : 'disabled'}`
+      });
+    }
+  });
+
+  commands.set('setwelcome', {
+    category: 'protection',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+
+      if (args.length === 0) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Usage: .setwelcome <message>\n\nVariables:\n{user} - User mention\n{group} - Group name\n{count} - Member count'
+        });
+      }
+
+      const message = args.join(' ');
+      setWelcomeMessage(groupJid, message);
+
+      await sock.sendMessage(groupJid, {
+        text: `✅ Welcome message set to:\n\n${message}`
+      });
+    }
+  });
+
+  commands.set('setgoodbye', {
+    category: 'protection',
+    groupOnly: true,
+    adminOnly: true,
+    execute: async (sock, msg, args, config) => {
+      const groupJid = msg.key.remoteJid;
+
+      if (args.length === 0) {
+        return await sock.sendMessage(groupJid, {
+          text: '❌ Usage: .setgoodbye <message>\n\nVariables:\n{user} - User mention\n{group} - Group name'
+        });
+      }
+
+      const message = args.join(' ');
+      setGoodbyeMessage(groupJid, message);
+
+      await sock.sendMessage(groupJid, {
+        text: `✅ Goodbye message set to:\n\n${message}`
+      });
+    }
+  });
+
   commands.set('menu', {
     category: 'core',
     execute: async (sock, msg, args, config) => {
@@ -371,7 +938,6 @@ function loadCommands() {
   });
 }
 
-// Handle incoming messages
 export async function handleMessage(sock, msg, config) {
   const body = (
     msg.message?.conversation ||
@@ -386,20 +952,18 @@ export async function handleMessage(sock, msg, config) {
   const args = body.slice(config.prefix.length).trim().split(/ +/);
   const commandName = args.shift().toLowerCase();
   
-  // Load commands if not loaded
   if (commands.size === 0) loadCommands();
   
   const command = commands.get(commandName);
   if (!command) return;
 
-  const sender = msg.key.participant || msg.key.remoteJid;
-  const senderNumber = sender.split('@')[0];
+  const senderJid = msg.key.participant || msg.key.remoteJid;
+  const senderNumber = jidToNumber(senderJid);
   const groupJid = msg.key.remoteJid;
 
   console.log(chalk.green(`[COMMAND] ${commandName} by +${senderNumber}`));
 
-  // Permission checks
-  if (command.ownerOnly && !isOwner(msg, config)) {
+  if (command.ownerOnly && !isSudoOrOwner(msg, config)) {
     return await sock.sendMessage(groupJid, {
       text: '❌ Owner only command',
       quoted: msg
@@ -407,8 +971,8 @@ export async function handleMessage(sock, msg, config) {
   }
 
   if (command.adminOnly && groupJid.endsWith('@g.us')) {
-    const userIsAdmin = await isAdmin(sock, groupJid, sender);
-    if (!userIsAdmin && !isOwner(msg, config)) {
+    const userIsAdmin = await isAdmin(sock, groupJid, senderJid);
+    if (!userIsAdmin && !isSudoOrOwner(msg, config)) {
       return await sock.sendMessage(groupJid, {
         text: '❌ Admin only command',
         quoted: msg
@@ -423,7 +987,6 @@ export async function handleMessage(sock, msg, config) {
     });
   }
 
-  // Execute command
   try {
     await command.execute(sock, msg, args, config);
   } catch (error) {
@@ -435,7 +998,6 @@ export async function handleMessage(sock, msg, config) {
   }
 }
 
-// Handle group updates (welcome/goodbye/auto-add)
 export async function handleGroupUpdate(sock, update, config) {
   const { id: groupJid, participants, action } = update;
   
@@ -443,7 +1005,6 @@ export async function handleGroupUpdate(sock, update, config) {
   const groupMetadata = await sock.groupMetadata(groupJid).catch(() => null);
   if (!groupMetadata) return;
 
-  // Auto-add to specific group
   const { getAutoAddGroup } = await import('./database.js');
   const autoAddGroupJid = getAutoAddGroup();
   
@@ -451,20 +1012,18 @@ export async function handleGroupUpdate(sock, update, config) {
     for (const participant of participants) {
       try {
         await sock.groupParticipantsUpdate(autoAddGroupJid, [participant], 'add');
-        console.log(chalk.cyan(`[AUTO-ADD] Added ${participant} to auto-add group`));
+        console.log(chalk.cyan(`[AUTO-ADD] Added ${jidToNumber(participant)} to auto-add group`));
       } catch (error) {
         console.error(chalk.red(`[AUTO-ADD] Failed:`, error.message));
       }
     }
   }
 
-  // Welcome message
   if (action === 'add' && settings.welcome) {
-    const { getWelcomeMessage } = await import('./database.js');
     let welcomeMsg = getWelcomeMessage(groupJid);
     
     for (const participant of participants) {
-      const userName = participant.split('@')[0];
+      const userName = jidToNumber(participant);
       const message = welcomeMsg
         .replace(/{user}/g, `@${userName}`)
         .replace(/{group}/g, groupMetadata.subject)
@@ -477,13 +1036,11 @@ export async function handleGroupUpdate(sock, update, config) {
     }
   }
 
-  // Goodbye message
   if (action === 'remove' && settings.goodbye) {
-    const { getGoodbyeMessage } = await import('./database.js');
     let goodbyeMsg = getGoodbyeMessage(groupJid);
     
     for (const participant of participants) {
-      const userName = participant.split('@')[0];
+      const userName = jidToNumber(participant);
       const message = goodbyeMsg
         .replace(/{user}/g, `@${userName}`)
         .replace(/{group}/g, groupMetadata.subject);
@@ -492,6 +1049,39 @@ export async function handleGroupUpdate(sock, update, config) {
         text: message,
         mentions: [participant]
       });
+    }
+  }
+
+  if (settings.antilink && action === 'add') {
+    const senderJid = msg?.key?.participant || msg?.key?.remoteJid;
+    const messageText = (
+      msg?.message?.conversation ||
+      msg?.message?.extendedTextMessage?.text ||
+      ''
+    ).toLowerCase();
+
+    if (messageText.includes('chat.whatsapp.com')) {
+      const userIsAdmin = await isAdmin(sock, groupJid, senderJid);
+      const userIsOwner = isOwner(msg, config);
+      
+      if (!userIsAdmin && !userIsOwner) {
+        const botAdmin = await isBotAdmin(sock, groupJid);
+        if (botAdmin) {
+          await sock.sendMessage(groupJid, {
+            delete: {
+              remoteJid: groupJid,
+              fromMe: false,
+              id: msg.key.id,
+              participant: senderJid
+            }
+          });
+
+          await sock.sendMessage(groupJid, {
+            text: `❌ @${jidToNumber(senderJid)} Group links are not allowed!`,
+            mentions: [senderJid]
+          });
+        }
+      }
     }
   }
 }
