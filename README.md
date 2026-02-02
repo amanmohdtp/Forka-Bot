@@ -23,6 +23,13 @@ It features a Pairing Code deployment system, eliminating the need for QR scanni
 
 ---
 
+<p align="center">
+  <a href="https://chat.whatsapp.com/GzqRPLO8C4B97pR8GhzgaG">
+    <img src="https://img.shields.io/badge/JOIN%20THE%20COMMUNITY-FFD700?style=for-the-badge&logo=whatsapp&logoColor=white" alt="Join WhatsApp Community"/>
+  </a>
+</p>
+
+---
 🚀 Deployment Methods
 
 1. Fork the Repository
