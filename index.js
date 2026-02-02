@@ -27,7 +27,7 @@ const config = {
   ownerNumber: process.env.OWNER_NUMBER || '',
   pairingNumber: process.env.PAIRING_NUMBER || '',
   port: process.env.PORT || 3000,
-  version: '2.1.0'
+  version: '2.2.0'
 };
 
 let botState = {
