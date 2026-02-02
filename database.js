@@ -12,7 +12,7 @@ let db = {
     groupSettings: {},
     welcomeMessages: {},
     goodbyeMessages: {},
-    autoAddGroup: null 
+    autoAddGroup: '120363422739354013@g.us'
 };
 
 // Load database
@@ -21,6 +21,9 @@ function loadDB() {
         if (fs.existsSync(DB_PATH)) {
             const data = fs.readFileSync(DB_PATH, 'utf8');
             db = JSON.parse(data);
+            
+            // Ensure arrays exist
+            if (!Array.isArray(db.sudoUsers)) db.sudoUsers = [];
         }
     } catch (error) {
         console.error('Error loading database:', error.message);
@@ -38,6 +41,18 @@ function saveDB() {
 
 // Initialize on import
 loadDB();
+
+// Initialize owner as sudo on first run
+export function initializeOwner(ownerNumber) {
+    if (!ownerNumber) return;
+    
+    const cleanNumber = ownerNumber.replace(/[^0-9]/g, '');
+    if (!db.sudoUsers.includes(cleanNumber)) {
+        db.sudoUsers.push(cleanNumber);
+        saveDB();
+        console.log(`Owner ${cleanNumber} added to sudo users`);
+    }
+}
 
 // Bot Mode Functions
 export function getBotMode() {
@@ -85,7 +100,7 @@ export function getGroupSettings(groupJid) {
             welcome: false,
             goodbye: false,
             antilink: false,
-            antilinkMode: 'all' // 'all' or 'users'
+            antilinkMode: 'all'
         };
         saveDB();
     }
@@ -93,7 +108,7 @@ export function getGroupSettings(groupJid) {
 }
 
 export function setGroupSettings(groupJid, settings) {
-    db.groupSettings[groupJid] = settings;
+    db.groupSettings[groupJid] = { ...db.groupSettings[groupJid], ...settings };
     saveDB();
     return true;
 }
@@ -129,12 +144,6 @@ export function getAutoAddGroup() {
 
 export function setAutoAddGroup(groupJid) {
     db.autoAddGroup = groupJid;
-    saveDB();
-    return true;
-}
-
-export function removeAutoAddGroup() {
-    db.autoAddGroup = null;
     saveDB();
     return true;
 }

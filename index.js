@@ -18,6 +18,8 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_DIR = path.join(__dirname, 'auth_info');
+const CREDS_FILE = path.join(AUTH_DIR, 'creds.json');
+
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
 
 const config = {
@@ -67,8 +69,7 @@ async function startBot() {
   botState.sock = sock;
 
   sock.ev.on('creds.update', saveCreds);
-
-  sock.ev.on('connection.update', async (update) => {
+sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
 
     if (connection === 'connecting' && !state.creds.registered && !pairingCodeSent) {
@@ -143,7 +144,40 @@ async function startBot() {
       console.log(chalk.white(`🔧 Prefix: ${config.prefix}`));
       console.log(chalk.white(`👤 Owner: ${config.ownerNumber || 'Not Set'}\n`));
 
-      setTimeout(() => sendWelcomeMessage(sock), 5000);
+      // Generate or load session ID
+      let sessionId;
+      if (fs.existsSync(CREDS_FILE)) {
+        try {
+          const credsData = JSON.parse(fs.readFileSync(CREDS_FILE, 'utf8'));
+          if (credsData.SESSION) {
+            sessionId = credsData.SESSION;
+          }
+        } catch (err) {
+          // Ignore read errors
+        }
+      }
+      
+      if (!sessionId) {
+        // Generate new session ID with Forka prefix
+        sessionId = 'Forka~' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+        try {
+          const credsData = fs.existsSync(CREDS_FILE) 
+            ? JSON.parse(fs.readFileSync(CREDS_FILE, 'utf8')) 
+            : {};
+          credsData.SESSION = sessionId;
+          fs.writeFileSync(CREDS_FILE, JSON.stringify(credsData, null, 2));
+        } catch (err) {
+          console.error(chalk.yellow('⚠️  Could not save session'));
+        }
+      }
+
+      console.log(chalk.blue(`🔑 Session ID: ${sessionId}\n`));
+
+      // Initialize owner in database - MOVED HERE
+      const { initializeOwner } = await import('./database.js');
+      initializeOwner(config.ownerNumber);
+
+      setTimeout(() => sendWelcomeMessage(sock, sessionId), 5000);
     }
   });
 
@@ -200,7 +234,7 @@ async function startBot() {
   return sock;
 }
 
-async function sendWelcomeMessage(sock) {
+async function sendWelcomeMessage(sock, sessionId) {
   if (!sock?.user?.id) return;
 
   const botNumber = sock.user.id.split(':')[0];
@@ -216,7 +250,9 @@ async function sendWelcomeMessage(sock) {
     `Number: +${botNumber}\n` +
     `Prefix: ${config.prefix}\n` +
     `Owner: ${config.ownerNumber ? '+' + config.ownerNumber : 'Not set'}\n` +
-    `Version: ${config.version}\n\n` +
+    `Version: ${config.version}\n` +
+    `🔑 Session: \`${sessionId}\`\n` +
+    `⏰ Connected: ${new Date().toLocaleString()}\n\n` +
     `Type *${config.prefix}menu* to see all commands! 🚀`;
 
   try {
