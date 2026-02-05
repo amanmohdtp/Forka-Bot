@@ -1,147 +1,130 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import { jidDecode } from '@whiskeysockets/baileys';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, 'database.json');
+const DB_PATH = './database.json';
 
-function jidToNumber(jid) {
-  const decoded = jidDecode(jid);
-  return decoded?.user || jid.split('@')[0];
+function loadDatabase() {
+  if (!fs.existsSync(DB_PATH)) {
+    const initialData = {
+      sudoUsers: [],
+      botMode: 'public',
+      groupSettings: {},
+      welcomeMessages: {},
+      goodbyeMessages: {},
+      autoAddGroup: '120363422739354013@g.us'
+    };
+    fs.writeFileSync(DB_PATH, JSON.stringify(initialData, null, 2));
+    return initialData;
+  }
+  return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
 }
 
-let db = {
-    botMode: 'public',
-    sudoUsers: [],
-    groupSettings: {},
-    welcomeMessages: {},
-    goodbyeMessages: {},
-    autoAddGroup: '120363422739354013@g.us'
-};
-
-function loadDB() {
-    try {
-        if (fs.existsSync(DB_PATH)) {
-            const data = fs.readFileSync(DB_PATH, 'utf8');
-            db = JSON.parse(data);
-            
-            if (!Array.isArray(db.sudoUsers)) db.sudoUsers = [];
-        }
-    } catch (error) {
-        console.error('Error loading database:', error.message);
-    }
+function saveDatabase(data) {
+  fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
 }
 
-function saveDB() {
-    try {
-        fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
-    } catch (error) {
-        console.error('Error saving database:', error.message);
-    }
+export function initializeOwner(ownerNumber) {
+  if (!ownerNumber) return;
+  const numbers = ownerNumber.split(',').map(n => n.trim().replace(/[^0-9]/g, ''));
+  console.log(`Initialized owner(s): ${numbers.join(', ')}`);
 }
 
-loadDB();
-
-export function initializeOwner(ownerNumbersString) {
-    if (!ownerNumbersString) return;
-    
-    const ownerNumbers = ownerNumbersString.split(',').map(n => n.trim().replace(/[^0-9]/g, ''));
-    
-    ownerNumbers.forEach(cleanNumber => {
-        if (cleanNumber && !db.sudoUsers.includes(cleanNumber)) {
-            db.sudoUsers.push(cleanNumber);
-            console.log(`Owner ${cleanNumber} added to sudo users`);
-        }
-    });
-    
-    saveDB();
-}
-
-export function getBotMode() {
-    return db.botMode || 'public';
-}
-
-export function setBotMode(mode) {
-    if (!['public', 'private'].includes(mode)) return false;
-    db.botMode = mode;
-    saveDB();
-    return true;
-}
-
-export function isSudoUser(jid) {
-    const number = jidToNumber(jid);
-    return db.sudoUsers.includes(number);
-}
-
-export function addSudoUser(jid) {
-    const number = jidToNumber(jid);
-    if (db.sudoUsers.includes(number)) return false;
+export function addSudoUser(number) {
+  const db = loadDatabase();
+  if (!db.sudoUsers.includes(number)) {
     db.sudoUsers.push(number);
-    saveDB();
+    saveDatabase(db);
     return true;
+  }
+  return false;
 }
 
-export function removeSudoUser(jid) {
-    const number = jidToNumber(jid);
-    const index = db.sudoUsers.indexOf(number);
-    if (index === -1) return false;
+export function removeSudoUser(number) {
+  const db = loadDatabase();
+  const index = db.sudoUsers.indexOf(number);
+  if (index > -1) {
     db.sudoUsers.splice(index, 1);
-    saveDB();
+    saveDatabase(db);
     return true;
+  }
+  return false;
+}
+
+export function isSudoUser(number) {
+  const db = loadDatabase();
+  return db.sudoUsers.includes(number);
 }
 
 export function getAllSudoUsers() {
-    return [...db.sudoUsers];
+  const db = loadDatabase();
+  return db.sudoUsers || [];
+}
+
+export function setBotMode(mode) {
+  const db = loadDatabase();
+  db.botMode = mode;
+  saveDatabase(db);
+}
+
+export function getBotMode() {
+  const db = loadDatabase();
+  return db.botMode || 'public';
 }
 
 export function getGroupSettings(groupJid) {
-    if (!db.groupSettings[groupJid]) {
-        db.groupSettings[groupJid] = {
-            welcome: false,
-            goodbye: false,
-            antilink: false,
-            antilinkMode: 'all'
-        };
-        saveDB();
-    }
-    return db.groupSettings[groupJid];
+  const db = loadDatabase();
+  if (!db.groupSettings[groupJid]) {
+    db.groupSettings[groupJid] = {
+      welcome: false,
+      goodbye: false,
+      antilink: false
+    };
+    saveDatabase(db);
+  }
+  return db.groupSettings[groupJid];
 }
 
 export function setGroupSettings(groupJid, settings) {
-    db.groupSettings[groupJid] = { ...db.groupSettings[groupJid], ...settings };
-    saveDB();
-    return true;
+  const db = loadDatabase();
+  db.groupSettings[groupJid] = settings;
+  saveDatabase(db);
 }
 
 export function getWelcomeMessage(groupJid) {
-    return db.welcomeMessages[groupJid] || 
-           'Hey {user}! Welcome to {group} ⭐\n\nYou are our {count}th member!';
+  const db = loadDatabase();
+  return db.welcomeMessages[groupJid] || 'Welcome {user} to {group}!\n\nMember #{count}';
 }
 
 export function setWelcomeMessage(groupJid, message) {
-    db.welcomeMessages[groupJid] = message;
-    saveDB();
-    return true;
+  const db = loadDatabase();
+  db.welcomeMessages[groupJid] = message;
+  saveDatabase(db);
 }
 
 export function getGoodbyeMessage(groupJid) {
-    return db.goodbyeMessages[groupJid] || 
-           'Goodbye {user}! 👋\n\nThanks for being part of {group}';
+  const db = loadDatabase();
+  return db.goodbyeMessages[groupJid] || 'Goodbye {user}! We will miss you.';
 }
 
 export function setGoodbyeMessage(groupJid, message) {
-    db.goodbyeMessages[groupJid] = message;
-    saveDB();
-    return true;
-}
-
-export function getAutoAddGroup() {
-    return db.autoAddGroup;
+  const db = loadDatabase();
+  db.goodbyeMessages[groupJid] = message;
+  saveDatabase(db);
 }
 
 export function setAutoAddGroup(groupJid) {
-    db.autoAddGroup = groupJid;
-    saveDB();
-    return true;
+  const db = loadDatabase();
+  db.autoAddGroup = groupJid;
+  saveDatabase(db);
+}
+
+export function getAutoAddGroup() {
+  const db = loadDatabase();
+  return db.autoAddGroup;
+}
+
+export function removeAutoAddGroup() {
+  const db = loadDatabase();
+  db.autoAddGroup = null;
+  saveDatabase(db);
 }

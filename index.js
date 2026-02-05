@@ -12,7 +12,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
-import { handleMessage, handleGroupUpdate } from './handler.js';
+import { handleMessage, handleGroupUpdate, initializeLidCache } from './handler.js';
 
 dotenv.config();
 
@@ -170,6 +170,8 @@ async function startBot() {
       }
 
       console.log(chalk.blue(`🔑 Session ID: ${sessionId}\n`));
+
+      await initializeLidCache(sock, config);
 
       const { initializeOwner } = await import('./database.js');
       initializeOwner(config.ownerNumber);
