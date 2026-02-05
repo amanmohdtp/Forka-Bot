@@ -82,6 +82,21 @@ Set these environment variables in your hosting dashboard:
 
 ---
 
+## 💡 Pro Tip
+
+You don’t need to pair again and again 👀  
+
+Once you generate the `auth_info` (or session) files, **reuse the same folder/file** to connect multiple times.
+
+As long as the auth files exist and aren’t deleted:
+- no new pair code needed  
+- faster reconnects  
+- less headache 😌  
+
+Just keep the auth folder safe and reuse it.
+
+---
+
 📞 Connect With Me
 
 <div align="center">
