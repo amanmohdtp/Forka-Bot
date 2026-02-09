@@ -219,59 +219,57 @@ export async function getGroupDataForPlugin(sock, chatId, senderId) {
 
     await updateGroupAdmins(chatId, participants);
 
-    let realUserJid = senderId;
-    if (senderId && senderId.includes('@lid')) {
-      const participantData = participants.find(p => p.lid === senderId);
-      if (participantData && participantData.id) {
-        realUserJid = participantData.id;
-      }
-    }
-
-    const senderNumber = jidToNumber(realUserJid);
+    // Extract bot number from connection JID
     const botNumber = jidToNumber(sock.user.id);
+    console.log(chalk.cyan(`[ADMIN-CACHE] Bot number from connection: ${botNumber}`));
 
-    console.log(chalk.cyan(`[ADMIN-CACHE] Bot number extracted: ${botNumber}`));
-    console.log(chalk.cyan(`[ADMIN-CACHE] Sender number extracted: ${senderNumber}`));
-
-    const userGroup = participants.find(p => {
-      const pNumber = jidToNumber(p.id);
-      return pNumber === senderNumber;
-    }) || {};
-
-    let botGroup = {};
-    let foundBot = false;
+    // Find bot's actual participant entry (which has the LID)
+    let botParticipant = null;
+    
+    console.log(chalk.yellow(`[ADMIN-CACHE] Searching for bot in ${participants.length} participants...`));
     
     for (const p of participants) {
       const pNumber = jidToNumber(p.id);
-      const pLid = p.lid;
-      const pLidNumber = pLid ? jidToNumber(pLid) : null;
       
-      if (pNumber === botNumber || pLidNumber === botNumber) {
+      console.log(chalk.gray(`[ADMIN-CACHE] Checking: ${p.id} -> number: ${pNumber}, admin: ${p.admin || 'member'}`));
+      
+      // Match by number extracted from participant ID
+      if (pNumber === botNumber) {
+        botParticipant = p;
         console.log(chalk.green(`[ADMIN-CACHE] ✅ BOT FOUND!`));
-        console.log(chalk.green(`   - JID: ${p.id}`));
-        console.log(chalk.green(`   - LID: ${p.lid}`));
-        console.log(chalk.green(`   - Admin Status: ${p.admin}`));
-        botGroup = p;
-        foundBot = true;
+        console.log(chalk.green(`   - Participant ID (LID): ${p.id}`));
+        console.log(chalk.green(`   - Number: ${pNumber}`));
+        console.log(chalk.green(`   - Admin Status: ${p.admin || 'member'}`));
         break;
       }
     }
 
-    if (!foundBot) {
-      console.log(chalk.yellow(`[ADMIN-CACHE] ⚠️ Bot participant NOT found in group!`));
-      console.log(chalk.yellow(`[ADMIN-CACHE] Participants in group:`));
+    if (!botParticipant) {
+      console.log(chalk.red(`[ADMIN-CACHE] ❌ BOT NOT FOUND IN PARTICIPANTS!`));
+      console.log(chalk.red(`[ADMIN-CACHE] Looking for number: ${botNumber}`));
+      console.log(chalk.red(`[ADMIN-CACHE] Available participants:`));
       participants.forEach((p, i) => {
-        console.log(chalk.yellow(`   ${i + 1}. ${jidToNumber(p.id)} (admin: ${p.admin})`));
+        console.log(chalk.red(`   ${i + 1}. ${p.id} (${jidToNumber(p.id)})`));
       });
     }
 
-    const isBotAdmin = botGroup?.admin === 'admin' || botGroup?.admin === 'superadmin';
+    // Check if bot is admin using the found participant
+    const isBotAdmin = botParticipant?.admin === 'admin' || botParticipant?.admin === 'superadmin';
     console.log(chalk.cyan(`[ADMIN-CACHE] Final isBotAdmin result: ${isBotAdmin}`));
+
+    // Handle sender (user who sent the command)
+    const senderNumber = jidToNumber(senderId);
+    console.log(chalk.cyan(`[ADMIN-CACHE] Sender number: ${senderNumber}`));
+
+    const userParticipant = participants.find(p => {
+      const pNumber = jidToNumber(p.id);
+      return pNumber === senderNumber;
+    }) || {};
 
     const groupData = {
       groupMetadata: metadata,
       participants,
-      isAdmin: userGroup?.admin === 'admin' || userGroup?.admin === 'superadmin',
+      isAdmin: userParticipant?.admin === 'admin' || userParticipant?.admin === 'superadmin',
       isBotAdmin: isBotAdmin
     };
 

@@ -350,132 +350,15 @@ function loadCommands() {
     }
   });
 
-  // ============ GAME COMMANDS ============
+  // ============ GAME COMMANDS (HIDDEN) ============
   commands.set('tictactoe', {
     category: 'games',
+    hidden: true,
     execute: async (sock, msg, args, config) => {
       const board = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣'];
       const gameBoard = `${board[0]}${board[1]}${board[2]}\n${board[3]}${board[4]}${board[5]}\n${board[6]}${board[7]}${board[8]}`;
       await sock.sendMessage(msg.key.remoteJid, {
         text: `🎮 *Tic Tac Toe Game Started!*\n\n${gameBoard}\n\nReact with numbers 1-9 to play!`
-      });
-    }
-  });
-
-  commands.set('dice', {
-    category: 'games',
-    execute: async (sock, msg, args, config) => {
-      const roll = Math.floor(Math.random() * 6) + 1;
-      const diceEmoji = ['🎲', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'][roll];
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: `🎲 *Dice Roll Result*\n\n${diceEmoji}\n\nYou rolled: *${roll}*`
-      });
-    }
-  });
-
-  commands.set('rps', {
-    category: 'games',
-    execute: async (sock, msg, args, config) => {
-      const choices = ['Rock 🪨', 'Paper 📄', 'Scissors ✂️'];
-      const botChoice = choices[Math.floor(Math.random() * 3)];
-      const userChoice = args[0]?.toLowerCase() || 'nothing';
-      
-      let result = '❓ Draw';
-      if (userChoice === 'rock' && botChoice.includes('Scissors')) result = '✅ You Win!';
-      if (userChoice === 'paper' && botChoice.includes('Rock')) result = '✅ You Win!';
-      if (userChoice === 'scissors' && botChoice.includes('Paper')) result = '✅ You Win!';
-      if (result === '❓ Draw' && userChoice !== 'nothing') result = '❌ You Lose!';
-
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: `✌️ *Rock Paper Scissors*\n\nYou: ${userChoice.toUpperCase()}\nBot: ${botChoice}\n\n${result}`
-      });
-    }
-  });
-
-  commands.set('wordle', {
-    category: 'games',
-    execute: async (sock, msg, args, config) => {
-      const words = ['JAVASCRIPT', 'WHATSAPP', 'DEVELOPER', 'FORKABOT', 'AMAZING', 'GAMING', 'PROGRAMMING', 'WHISKEY'];
-      const secretWord = words[Math.floor(Math.random() * words.length)];
-      const blank = '_'.repeat(secretWord.length);
-      
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: `📝 *Wordle Game Started*\n\nGuess the ${secretWord.length}-letter word in 6 tries!\n\n${blank}\n\nUsage: .answer <your guess>`
-      });
-    }
-  });
-
-  commands.set('8ball', {
-    category: 'games',
-    execute: async (sock, msg, args, config) => {
-      const answers = [
-        '✅ Yes',
-        '❌ No',
-        '🤔 Maybe',
-        '⏰ Ask again later',
-        '💯 Definitely',
-        '🚫 Absolutely not',
-        '🌟 Outlook good',
-        '⚠️ Don\'t count on it',
-        '👍 Very likely',
-        '💭 Concentrate and ask again'
-      ];
-      const answer = answers[Math.floor(Math.random() * answers.length)];
-      
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: `🔮 *Magic 8 Ball*\n\n${answer}`
-      });
-    }
-  });
-
-  commands.set('trivia', {
-    category: 'games',
-    execute: async (sock, msg, args, config) => {
-      const questions = [
-        { q: 'What is the capital of France?', a: 'paris', options: 'A) Paris, B) Berlin, C) Madrid, D) Rome' },
-        { q: 'What is 2+2?', a: '4', options: 'A) 3, B) 4, C) 5, D) 6' },
-        { q: 'What color is the sky?', a: 'blue', options: 'A) Green, B) Red, C) Blue, D) Yellow' },
-        { q: 'What is the largest planet?', a: 'jupiter', options: 'A) Mars, B) Saturn, C) Jupiter, D) Neptune' },
-        { q: 'What is 10-5?', a: '5', options: 'A) 3, B) 4, C) 5, D) 6' }
-      ];
-      const question = questions[Math.floor(Math.random() * questions.length)];
-      
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: `🧠 *Trivia Quiz*\n\n${question.q}\n\n${question.options}\n\nUsage: .answer <your answer>`
-      });
-    }
-  });
-
-  commands.set('hangman', {
-    category: 'games',
-    execute: async (sock, msg, args, config) => {
-      const words = ['JAVASCRIPT', 'HANGMAN', 'DEVELOPER', 'WHATSAPP', 'PROGRAMMING', 'GAMING', 'ADVENTURE', 'MYSTERY'];
-      const word = words[Math.floor(Math.random() * words.length)];
-      const hidden = '_'.repeat(word.length);
-      
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: `🎭 *Hangman Game*\n\nGuess the word:\n${hidden}\n\nWord length: ${word.length}\nGuesses left: 6\n\nUsage: .guess <letter>`
-      });
-    }
-  });
-
-  commands.set('riddle', {
-    category: 'games',
-    execute: async (sock, msg, args, config) => {
-      const riddles = [
-        { q: 'What has keys but no locks?', a: 'piano' },
-        { q: 'What has a head and a tail but no body?', a: 'coin' },
-        { q: 'What can travel around the world while staying in a corner?', a: 'stamp' },
-        { q: 'I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?', a: 'echo' },
-        { q: 'The more you take, the more you leave behind. What am I?', a: 'footsteps' },
-        { q: 'What question can you never answer yes to?', a: 'are you asleep' },
-        { q: 'What gets wetter the more it dries?', a: 'towel' },
-        { q: 'What can run but never walks?', a: 'water' }
-      ];
-      const riddle = riddles[Math.floor(Math.random() * riddles.length)];
-      
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: `🎪 *Riddle Challenge*\n\n${riddle.q}\n\nUsage: .answer <your answer>`
       });
     }
   });
@@ -527,7 +410,7 @@ function loadCommands() {
       }
       
       await sock.sendMessage(msg.key.remoteJid, {
-        text: success ? `✅ User added as sudo` : `❌ User already sudo`,
+        text: success ? `✅ User +${targetNumber} added as sudo` : `❌ User already sudo`,
         mentions: [targetJid]
       });
     }
@@ -556,7 +439,7 @@ function loadCommands() {
       const success = removeSudoUser(targetNumber);
       
       await sock.sendMessage(msg.key.remoteJid, {
-        text: success ? `✅ User removed from sudo` : `❌ User is not sudo`,
+        text: success ? `✅ User +${targetNumber} removed from sudo` : `❌ User is not sudo`,
         mentions: [targetJid]
       });
     }
@@ -599,12 +482,12 @@ function loadCommands() {
         });
       }
 
-      storeLid(targetJid);
+      const targetNumber = storeLid(targetJid);
       
       try {
         await sock.updateBlockStatus(targetJid, 'block');
         await sock.sendMessage(msg.key.remoteJid, {
-          text: `✅ Blocked user`,
+          text: `✅ Blocked user +${targetNumber}`,
           mentions: [targetJid]
         });
       } catch (error) {
@@ -632,12 +515,12 @@ function loadCommands() {
         });
       }
 
-      storeLid(targetJid);
+      const targetNumber = storeLid(targetJid);
       
       try {
         await sock.updateBlockStatus(targetJid, 'unblock');
         await sock.sendMessage(msg.key.remoteJid, {
-          text: `✅ Unblocked user`,
+          text: `✅ Unblocked user +${targetNumber}`,
           mentions: [targetJid]
         });
       } catch (error) {
@@ -732,6 +615,8 @@ function loadCommands() {
     botAdminRequired: true,
     execute: async (sock, msg, args, config) => {
       const groupJid = msg.key.remoteJid;
+      const senderJid = msg.key.participant || msg.key.remoteJid;
+      const senderNumber = jidToNumber(senderJid);
 
       if (args.length === 0) {
         return await sock.sendMessage(groupJid, {
@@ -744,8 +629,9 @@ function loadCommands() {
 
       try {
         await sock.groupParticipantsUpdate(groupJid, [userJid], 'add');
+        console.log(chalk.green(`[ADD] By +${senderNumber} (${senderJid})`));
         await sock.sendMessage(groupJid, {
-          text: `✅ Added +${number}`,
+          text: `✅ Added +${number} by +${senderNumber}`,
           mentions: [userJid]
         });
       } catch (error) {
@@ -763,6 +649,8 @@ function loadCommands() {
     botAdminRequired: true,
     execute: async (sock, msg, args, config) => {
       const groupJid = msg.key.remoteJid;
+      const senderJid = msg.key.participant || msg.key.remoteJid;
+      const senderNumber = jidToNumber(senderJid);
 
       const targetJid = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
       if (!targetJid) {
@@ -771,12 +659,13 @@ function loadCommands() {
         });
       }
 
-      storeLid(targetJid);
+      const targetNumber = storeLid(targetJid);
 
       try {
         await sock.groupParticipantsUpdate(groupJid, [targetJid], 'remove');
+        console.log(chalk.green(`[KICK] +${targetNumber} by +${senderNumber} (${senderJid})`));
         await sock.sendMessage(groupJid, {
-          text: `✅ Kicked user`,
+          text: `✅ Kicked +${targetNumber} by +${senderNumber}`,
           mentions: [targetJid]
         });
       } catch (error) {
@@ -794,6 +683,8 @@ function loadCommands() {
     botAdminRequired: true,
     execute: async (sock, msg, args, config) => {
       const groupJid = msg.key.remoteJid;
+      const senderJid = msg.key.participant || msg.key.remoteJid;
+      const senderNumber = jidToNumber(senderJid);
 
       const targetJid = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
       if (!targetJid) {
@@ -802,12 +693,13 @@ function loadCommands() {
         });
       }
 
-      storeLid(targetJid);
+      const targetNumber = storeLid(targetJid);
 
       try {
         await sock.groupParticipantsUpdate(groupJid, [targetJid], 'promote');
+        console.log(chalk.green(`[PROMOTE] +${targetNumber} by +${senderNumber} (${senderJid})`));
         await sock.sendMessage(groupJid, {
-          text: `✅ Promoted to admin`,
+          text: `✅ Promoted +${targetNumber} to admin by +${senderNumber}`,
           mentions: [targetJid]
         });
       } catch (error) {
@@ -825,6 +717,8 @@ function loadCommands() {
     botAdminRequired: true,
     execute: async (sock, msg, args, config) => {
       const groupJid = msg.key.remoteJid;
+      const senderJid = msg.key.participant || msg.key.remoteJid;
+      const senderNumber = jidToNumber(senderJid);
 
       const targetJid = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
       if (!targetJid) {
@@ -833,12 +727,13 @@ function loadCommands() {
         });
       }
 
-      storeLid(targetJid);
+      const targetNumber = storeLid(targetJid);
 
       try {
         await sock.groupParticipantsUpdate(groupJid, [targetJid], 'demote');
+        console.log(chalk.green(`[DEMOTE] +${targetNumber} by +${senderNumber} (${senderJid})`));
         await sock.sendMessage(groupJid, {
-          text: `✅ Demoted from admin`,
+          text: `✅ Demoted +${targetNumber} from admin by +${senderNumber}`,
           mentions: [targetJid]
         });
       } catch (error) {
@@ -1073,6 +968,8 @@ function loadCommands() {
     botAdminRequired: true,
     execute: async (sock, msg, args, config) => {
       const groupJid = msg.key.remoteJid;
+      const senderJid = msg.key.participant || msg.key.remoteJid;
+      const senderNumber = jidToNumber(senderJid);
 
       const action = args[0]?.toLowerCase();
       if (!['open', 'close'].includes(action)) {
@@ -1083,8 +980,9 @@ function loadCommands() {
 
       try {
         await sock.groupSettingUpdate(groupJid, action === 'close' ? 'announcement' : 'not_announcement');
+        console.log(chalk.green(`[GROUP] ${action} by +${senderNumber} (${senderJid})`));
         await sock.sendMessage(groupJid, {
-          text: `✅ Group ${action === 'close' ? 'closed' : 'opened'}`
+          text: `✅ Group ${action === 'close' ? 'closed' : 'opened'} by +${senderNumber}`
         });
       } catch (error) {
         await sock.sendMessage(groupJid, {
@@ -1101,11 +999,14 @@ function loadCommands() {
     botAdminRequired: true,
     execute: async (sock, msg, args, config) => {
       const groupJid = msg.key.remoteJid;
+      const senderJid = msg.key.participant || msg.key.remoteJid;
+      const senderNumber = jidToNumber(senderJid);
 
       try {
         await sock.groupSettingUpdate(groupJid, 'announcement');
+        console.log(chalk.green(`[MUTE] By +${senderNumber} (${senderJid})`));
         await sock.sendMessage(groupJid, {
-          text: `🔇 Group muted - Only admins can send messages`
+          text: `🔇 Group muted by +${senderNumber} - Only admins can send messages`
         });
       } catch (error) {
         await sock.sendMessage(groupJid, {
@@ -1122,11 +1023,14 @@ function loadCommands() {
     botAdminRequired: true,
     execute: async (sock, msg, args, config) => {
       const groupJid = msg.key.remoteJid;
+      const senderJid = msg.key.participant || msg.key.remoteJid;
+      const senderNumber = jidToNumber(senderJid);
 
       try {
         await sock.groupSettingUpdate(groupJid, 'not_announcement');
+        console.log(chalk.green(`[UNMUTE] By +${senderNumber} (${senderJid})`));
         await sock.sendMessage(groupJid, {
-          text: `🔊 Group unmuted - Everyone can send messages`
+          text: `🔊 Group unmuted by +${senderNumber} - Everyone can send messages`
         });
       } catch (error) {
         await sock.sendMessage(groupJid, {
@@ -1261,16 +1165,6 @@ function loadCommands() {
       
       const menuText = `*🤖 ${config.botName.toUpperCase()} MENU*
 
-*🎮 GAMES (8 FUN GAMES)*
-.tictactoe - Tic Tac Toe
-.dice - Dice Roll
-.rps - Rock Paper Scissors
-.wordle - Word Guessing
-.8ball - Magic 8 Ball
-.trivia - Trivia Quiz
-.hangman - Hangman Game
-.riddle - Riddle Challenge
-
 *🏷️ CORE*
 .alive
 .ping
@@ -1361,7 +1255,7 @@ export async function handleMessage(sock, msg, config) {
       storeLid(senderJid);
     }
 
-    console.log(chalk.green(`[COMMAND] ${commandName} by +${senderNumber || 'unknown'}`));
+    console.log(chalk.green(`[COMMAND] ${commandName} by +${senderNumber || 'unknown'} (${senderJid})`));
 
     if (groupJid.endsWith('@g.us')) {
       await updateLidFromGroup(sock, groupJid);
