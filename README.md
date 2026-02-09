@@ -59,9 +59,9 @@ Set these environment variables in your hosting dashboard:
 
 | Variable       | Description                                  |
 |----------------|----------------------------------------------|
-| PAIRING_NUMBER | Your WhatsApp number (e.g., 919876543210)   |
-| OWNER_NUMBER   | Your personal number for admin access       |
-| PREFIX         | Command prefix (Default: .)               |
+| PAIRING_NUMBER | Your WhatsApp number                         |
+| OWNER_NUMBER   | Your personal number for admin access        |
+| PREFIX         | Command prefix                               |
 
 ---
 
