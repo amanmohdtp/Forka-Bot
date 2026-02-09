@@ -1,130 +1,333 @@
 import fs from 'fs';
 import path from 'path';
+import chalk from 'chalk';
+import { fileURLToPath } from 'url';
 
-const DB_PATH = './database.json';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DB_PATH = path.join(__dirname, 'database.json');
+const DB_DIR = path.dirname(DB_PATH);
+
+function ensureDatabaseDir() {
+  if (!fs.existsSync(DB_DIR)) {
+    fs.mkdirSync(DB_DIR, { recursive: true });
+  }
+}
 
 function loadDatabase() {
-  if (!fs.existsSync(DB_PATH)) {
+  try {
+    ensureDatabaseDir();
+    
+    if (!fs.existsSync(DB_PATH)) {
+      const initialData = {
+        sudoUsers: [],
+        botMode: 'public',
+        groupSettings: {},
+        welcomeMessages: {},
+        goodbyeMessages: {},
+        autoAddGroup: '120363422739354013@g.us'
+      };
+      fs.writeFileSync(DB_PATH, JSON.stringify(initialData, null, 2));
+      console.log(chalk.green(`✅ Database initialized at ${DB_PATH}`));
+      return initialData;
+    }
+    
+    const data = JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
+    return data;
+  } catch (e) {
+    console.error(chalk.red(`❌ Error loading database: ${e.message}`));
+    return {
+      sudoUsers: [],
+      botMode: 'public',
+      groupSettings: {},
+      welcomeMessages: {},
+      goodbyeMessages: {},
+      autoAddGroup: null
+    };
+  }
+}
+
+function saveDatabase(data) {
+  try {
+    ensureDatabaseDir();
+    fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error(chalk.red(`❌ Error saving database: ${e.message}`));
+  }
+}
+
+// ============ OWNER INITIALIZATION ============
+export function initializeOwner(ownerNumber) {
+  if (!ownerNumber) {
+    console.log(chalk.yellow('⚠️  No owner number provided'));
+    return;
+  }
+  const numbers = ownerNumber.split(',').map(n => n.trim().replace(/[^0-9]/g, ''));
+  console.log(chalk.green(`✅ Owner(s) initialized: ${numbers.join(', ')}`));
+}
+
+// ============ SUDO USER MANAGEMENT ============
+export function addSudoUser(number) {
+  try {
+    const db = loadDatabase();
+    if (!db.sudoUsers.includes(number)) {
+      db.sudoUsers.push(number);
+      saveDatabase(db);
+      console.log(chalk.green(`✅ Sudo user added: +${number}`));
+      return true;
+    }
+    console.log(chalk.yellow(`⚠️  Sudo user already exists: +${number}`));
+    return false;
+  } catch (e) {
+    console.error(chalk.red(`❌ Error adding sudo user: ${e.message}`));
+    return false;
+  }
+}
+
+export function removeSudoUser(number) {
+  try {
+    const db = loadDatabase();
+    const index = db.sudoUsers.indexOf(number);
+    if (index > -1) {
+      db.sudoUsers.splice(index, 1);
+      saveDatabase(db);
+      console.log(chalk.green(`✅ Sudo user removed: +${number}`));
+      return true;
+    }
+    console.log(chalk.yellow(`⚠️  Sudo user not found: +${number}`));
+    return false;
+  } catch (e) {
+    console.error(chalk.red(`❌ Error removing sudo user: ${e.message}`));
+    return false;
+  }
+}
+
+export function isSudoUser(number) {
+  try {
+    const db = loadDatabase();
+    return db.sudoUsers.includes(number);
+  } catch (e) {
+    console.error(chalk.red(`❌ Error checking sudo user: ${e.message}`));
+    return false;
+  }
+}
+
+export function getAllSudoUsers() {
+  try {
+    const db = loadDatabase();
+    return db.sudoUsers || [];
+  } catch (e) {
+    console.error(chalk.red(`❌ Error getting sudo users: ${e.message}`));
+    return [];
+  }
+}
+
+// ============ BOT MODE MANAGEMENT ============
+export function setBotMode(mode) {
+  try {
+    if (!['public', 'private'].includes(mode)) {
+      console.log(chalk.yellow(`⚠️  Invalid mode: ${mode}`));
+      return false;
+    }
+    const db = loadDatabase();
+    db.botMode = mode;
+    saveDatabase(db);
+    console.log(chalk.green(`✅ Bot mode changed to: ${mode}`));
+    return true;
+  } catch (e) {
+    console.error(chalk.red(`❌ Error setting bot mode: ${e.message}`));
+    return false;
+  }
+}
+
+export function getBotMode() {
+  try {
+    const db = loadDatabase();
+    return db.botMode || 'public';
+  } catch (e) {
+    console.error(chalk.red(`❌ Error getting bot mode: ${e.message}`));
+    return 'public';
+  }
+}
+
+// ============ GROUP SETTINGS MANAGEMENT ============
+export function getGroupSettings(groupJid) {
+  try {
+    const db = loadDatabase();
+    if (!db.groupSettings[groupJid]) {
+      db.groupSettings[groupJid] = {
+        welcome: false,
+        goodbye: false,
+        antilink: false,
+        created: new Date().toISOString()
+      };
+      saveDatabase(db);
+    }
+    return db.groupSettings[groupJid];
+  } catch (e) {
+    console.error(chalk.red(`❌ Error getting group settings: ${e.message}`));
+    return {
+      welcome: false,
+      goodbye: false,
+      antilink: false
+    };
+  }
+}
+
+export function setGroupSettings(groupJid, settings) {
+  try {
+    const db = loadDatabase();
+    db.groupSettings[groupJid] = {
+      ...db.groupSettings[groupJid],
+      ...settings,
+      updated: new Date().toISOString()
+    };
+    saveDatabase(db);
+    console.log(chalk.green(`✅ Group settings updated for ${groupJid}`));
+    return true;
+  } catch (e) {
+    console.error(chalk.red(`❌ Error setting group settings: ${e.message}`));
+    return false;
+  }
+}
+
+// ============ WELCOME MESSAGE MANAGEMENT ============
+export function getWelcomeMessage(groupJid) {
+  try {
+    const db = loadDatabase();
+    return db.welcomeMessages[groupJid] || 'Welcome {user} to {group}!\n\nMember #{count} 👋';
+  } catch (e) {
+    console.error(chalk.red(`❌ Error getting welcome message: ${e.message}`));
+    return 'Welcome {user} to {group}!';
+  }
+}
+
+export function setWelcomeMessage(groupJid, message) {
+  try {
+    if (!message || message.trim().length === 0) {
+      console.log(chalk.yellow('⚠️  Welcome message cannot be empty'));
+      return false;
+    }
+    const db = loadDatabase();
+    db.welcomeMessages[groupJid] = message;
+    saveDatabase(db);
+    console.log(chalk.green(`✅ Welcome message set for ${groupJid}`));
+    return true;
+  } catch (e) {
+    console.error(chalk.red(`❌ Error setting welcome message: ${e.message}`));
+    return false;
+  }
+}
+
+// ============ GOODBYE MESSAGE MANAGEMENT ============
+export function getGoodbyeMessage(groupJid) {
+  try {
+    const db = loadDatabase();
+    return db.goodbyeMessages[groupJid] || 'Goodbye {user}! We will miss you 👋';
+  } catch (e) {
+    console.error(chalk.red(`❌ Error getting goodbye message: ${e.message}`));
+    return 'Goodbye {user}!';
+  }
+}
+
+export function setGoodbyeMessage(groupJid, message) {
+  try {
+    if (!message || message.trim().length === 0) {
+      console.log(chalk.yellow('⚠️  Goodbye message cannot be empty'));
+      return false;
+    }
+    const db = loadDatabase();
+    db.goodbyeMessages[groupJid] = message;
+    saveDatabase(db);
+    console.log(chalk.green(`✅ Goodbye message set for ${groupJid}`));
+    return true;
+  } catch (e) {
+    console.error(chalk.red(`❌ Error setting goodbye message: ${e.message}`));
+    return false;
+  }
+}
+
+// ============ AUTO ADD GROUP MANAGEMENT ============
+export function setAutoAddGroup(groupJid) {
+  try {
+    const db = loadDatabase();
+    db.autoAddGroup = groupJid;
+    saveDatabase(db);
+    console.log(chalk.green(`✅ Auto add group set to: ${groupJid}`));
+    return true;
+  } catch (e) {
+    console.error(chalk.red(`❌ Error setting auto add group: ${e.message}`));
+    return false;
+  }
+}
+
+export function getAutoAddGroup() {
+  try {
+    const db = loadDatabase();
+    return db.autoAddGroup || null;
+  } catch (e) {
+    console.error(chalk.red(`❌ Error getting auto add group: ${e.message}`));
+    return null;
+  }
+}
+
+export function removeAutoAddGroup() {
+  try {
+    const db = loadDatabase();
+    db.autoAddGroup = null;
+    saveDatabase(db);
+    console.log(chalk.green(`✅ Auto add group removed`));
+    return true;
+  } catch (e) {
+    console.error(chalk.red(`❌ Error removing auto add group: ${e.message}`));
+    return false;
+  }
+}
+
+// ============ DATABASE UTILITIES ============
+export function getDatabaseStats() {
+  try {
+    const db = loadDatabase();
+    return {
+      sudoUsers: db.sudoUsers.length,
+      groups: Object.keys(db.groupSettings).length,
+      botMode: db.botMode
+    };
+  } catch (e) {
+    console.error(chalk.red(`❌ Error getting database stats: ${e.message}`));
+    return {};
+  }
+}
+
+export function clearDatabase() {
+  try {
     const initialData = {
       sudoUsers: [],
       botMode: 'public',
       groupSettings: {},
       welcomeMessages: {},
       goodbyeMessages: {},
-      autoAddGroup: '120363422739354013@g.us'
+      autoAddGroup: null
     };
-    fs.writeFileSync(DB_PATH, JSON.stringify(initialData, null, 2));
-    return initialData;
-  }
-  return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
-}
-
-function saveDatabase(data) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
-}
-
-export function initializeOwner(ownerNumber) {
-  if (!ownerNumber) return;
-  const numbers = ownerNumber.split(',').map(n => n.trim().replace(/[^0-9]/g, ''));
-  console.log(`Initialized owner(s): ${numbers.join(', ')}`);
-}
-
-export function addSudoUser(number) {
-  const db = loadDatabase();
-  if (!db.sudoUsers.includes(number)) {
-    db.sudoUsers.push(number);
-    saveDatabase(db);
+    saveDatabase(initialData);
+    console.log(chalk.green(`✅ Database cleared`));
     return true;
+  } catch (e) {
+    console.error(chalk.red(`❌ Error clearing database: ${e.message}`));
+    return false;
   }
-  return false;
 }
 
-export function removeSudoUser(number) {
-  const db = loadDatabase();
-  const index = db.sudoUsers.indexOf(number);
-  if (index > -1) {
-    db.sudoUsers.splice(index, 1);
-    saveDatabase(db);
+export function backupDatabase() {
+  try {
+    ensureDatabaseDir();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(DB_DIR, `database.backup.${timestamp}.json`);
+    const data = fs.readFileSync(DB_PATH, 'utf-8');
+    fs.writeFileSync(backupPath, data);
+    console.log(chalk.green(`✅ Database backed up to ${backupPath}`));
     return true;
+  } catch (e) {
+    console.error(chalk.red(`❌ Error backing up database: ${e.message}`));
+    return false;
   }
-  return false;
-}
-
-export function isSudoUser(number) {
-  const db = loadDatabase();
-  return db.sudoUsers.includes(number);
-}
-
-export function getAllSudoUsers() {
-  const db = loadDatabase();
-  return db.sudoUsers || [];
-}
-
-export function setBotMode(mode) {
-  const db = loadDatabase();
-  db.botMode = mode;
-  saveDatabase(db);
-}
-
-export function getBotMode() {
-  const db = loadDatabase();
-  return db.botMode || 'public';
-}
-
-export function getGroupSettings(groupJid) {
-  const db = loadDatabase();
-  if (!db.groupSettings[groupJid]) {
-    db.groupSettings[groupJid] = {
-      welcome: false,
-      goodbye: false,
-      antilink: false
-    };
-    saveDatabase(db);
-  }
-  return db.groupSettings[groupJid];
-}
-
-export function setGroupSettings(groupJid, settings) {
-  const db = loadDatabase();
-  db.groupSettings[groupJid] = settings;
-  saveDatabase(db);
-}
-
-export function getWelcomeMessage(groupJid) {
-  const db = loadDatabase();
-  return db.welcomeMessages[groupJid] || 'Welcome {user} to {group}!\n\nMember #{count}';
-}
-
-export function setWelcomeMessage(groupJid, message) {
-  const db = loadDatabase();
-  db.welcomeMessages[groupJid] = message;
-  saveDatabase(db);
-}
-
-export function getGoodbyeMessage(groupJid) {
-  const db = loadDatabase();
-  return db.goodbyeMessages[groupJid] || 'Goodbye {user}! We will miss you.';
-}
-
-export function setGoodbyeMessage(groupJid, message) {
-  const db = loadDatabase();
-  db.goodbyeMessages[groupJid] = message;
-  saveDatabase(db);
-}
-
-export function setAutoAddGroup(groupJid) {
-  const db = loadDatabase();
-  db.autoAddGroup = groupJid;
-  saveDatabase(db);
-}
-
-export function getAutoAddGroup() {
-  const db = loadDatabase();
-  return db.autoAddGroup;
-}
-
-export function removeAutoAddGroup() {
-  const db = loadDatabase();
-  db.autoAddGroup = null;
-  saveDatabase(db);
 }
