@@ -1,6 +1,6 @@
 {
   "name": "forka-bot",
-  "version": "2.2.0",
+  "version": "2.3.3",
   "description": "Minimal WhatsApp Bot using Baileys",
   "main": "index.js",
   "type": "module",
