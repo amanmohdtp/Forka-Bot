@@ -8,15 +8,12 @@ const DB_PATH = path.join(__dirname, 'database.json');
 const DB_DIR = path.dirname(DB_PATH);
 
 function ensureDatabaseDir() {
-  if (!fs.existsSync(DB_DIR)) {
-    fs.mkdirSync(DB_DIR, { recursive: true });
-  }
+  if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
 }
 
 function loadDatabase() {
   try {
     ensureDatabaseDir();
-    
     if (!fs.existsSync(DB_PATH)) {
       const initialData = {
         sudoUsers: [],
@@ -27,22 +24,12 @@ function loadDatabase() {
         autoAddGroup: '120363422739354013@g.us'
       };
       fs.writeFileSync(DB_PATH, JSON.stringify(initialData, null, 2));
-      console.log(chalk.green(`✅ Database initialized at ${DB_PATH}`));
       return initialData;
     }
-    
-    const data = JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
-    return data;
+    return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
   } catch (e) {
     console.error(chalk.red(`❌ Error loading database: ${e.message}`));
-    return {
-      sudoUsers: [],
-      botMode: 'public',
-      groupSettings: {},
-      welcomeMessages: {},
-      goodbyeMessages: {},
-      autoAddGroup: null
-    };
+    return { sudoUsers: [], botMode: 'public', groupSettings: {}, welcomeMessages: {}, goodbyeMessages: {}, autoAddGroup: null };
   }
 }
 
@@ -55,7 +42,6 @@ function saveDatabase(data) {
   }
 }
 
-// ============ OWNER INITIALIZATION ============
 export function initializeOwner(ownerNumber) {
   if (!ownerNumber) {
     console.log(chalk.yellow('⚠️  No owner number provided'));
@@ -65,7 +51,6 @@ export function initializeOwner(ownerNumber) {
   console.log(chalk.green(`✅ Owner(s) initialized: ${numbers.join(', ')}`));
 }
 
-// ============ SUDO USER MANAGEMENT ============
 export function addSudoUser(number) {
   try {
     const db = loadDatabase();
@@ -75,7 +60,6 @@ export function addSudoUser(number) {
       console.log(chalk.green(`✅ Sudo user added: +${number}`));
       return true;
     }
-    console.log(chalk.yellow(`⚠️  Sudo user already exists: +${number}`));
     return false;
   } catch (e) {
     console.error(chalk.red(`❌ Error adding sudo user: ${e.message}`));
@@ -93,7 +77,6 @@ export function removeSudoUser(number) {
       console.log(chalk.green(`✅ Sudo user removed: +${number}`));
       return true;
     }
-    console.log(chalk.yellow(`⚠️  Sudo user not found: +${number}`));
     return false;
   } catch (e) {
     console.error(chalk.red(`❌ Error removing sudo user: ${e.message}`));
@@ -121,13 +104,9 @@ export function getAllSudoUsers() {
   }
 }
 
-// ============ BOT MODE MANAGEMENT ============
 export function setBotMode(mode) {
   try {
-    if (!['public', 'private'].includes(mode)) {
-      console.log(chalk.yellow(`⚠️  Invalid mode: ${mode}`));
-      return false;
-    }
+    if (!['public', 'private'].includes(mode)) return false;
     const db = loadDatabase();
     db.botMode = mode;
     saveDatabase(db);
@@ -149,40 +128,25 @@ export function getBotMode() {
   }
 }
 
-// ============ GROUP SETTINGS MANAGEMENT ============
 export function getGroupSettings(groupJid) {
   try {
     const db = loadDatabase();
     if (!db.groupSettings[groupJid]) {
-      db.groupSettings[groupJid] = {
-        welcome: false,
-        goodbye: false,
-        antilink: false,
-        created: new Date().toISOString()
-      };
+      db.groupSettings[groupJid] = { welcome: false, goodbye: false, antilink: false, created: new Date().toISOString() };
       saveDatabase(db);
     }
     return db.groupSettings[groupJid];
   } catch (e) {
     console.error(chalk.red(`❌ Error getting group settings: ${e.message}`));
-    return {
-      welcome: false,
-      goodbye: false,
-      antilink: false
-    };
+    return { welcome: false, goodbye: false, antilink: false };
   }
 }
 
 export function setGroupSettings(groupJid, settings) {
   try {
     const db = loadDatabase();
-    db.groupSettings[groupJid] = {
-      ...db.groupSettings[groupJid],
-      ...settings,
-      updated: new Date().toISOString()
-    };
+    db.groupSettings[groupJid] = { ...db.groupSettings[groupJid], ...settings, updated: new Date().toISOString() };
     saveDatabase(db);
-    console.log(chalk.green(`✅ Group settings updated for ${groupJid}`));
     return true;
   } catch (e) {
     console.error(chalk.red(`❌ Error setting group settings: ${e.message}`));
@@ -190,7 +154,6 @@ export function setGroupSettings(groupJid, settings) {
   }
 }
 
-// ============ WELCOME MESSAGE MANAGEMENT ============
 export function getWelcomeMessage(groupJid) {
   try {
     const db = loadDatabase();
@@ -203,14 +166,10 @@ export function getWelcomeMessage(groupJid) {
 
 export function setWelcomeMessage(groupJid, message) {
   try {
-    if (!message || message.trim().length === 0) {
-      console.log(chalk.yellow('⚠️  Welcome message cannot be empty'));
-      return false;
-    }
+    if (!message?.trim()) return false;
     const db = loadDatabase();
     db.welcomeMessages[groupJid] = message;
     saveDatabase(db);
-    console.log(chalk.green(`✅ Welcome message set for ${groupJid}`));
     return true;
   } catch (e) {
     console.error(chalk.red(`❌ Error setting welcome message: ${e.message}`));
@@ -218,7 +177,6 @@ export function setWelcomeMessage(groupJid, message) {
   }
 }
 
-// ============ GOODBYE MESSAGE MANAGEMENT ============
 export function getGoodbyeMessage(groupJid) {
   try {
     const db = loadDatabase();
@@ -231,14 +189,10 @@ export function getGoodbyeMessage(groupJid) {
 
 export function setGoodbyeMessage(groupJid, message) {
   try {
-    if (!message || message.trim().length === 0) {
-      console.log(chalk.yellow('⚠️  Goodbye message cannot be empty'));
-      return false;
-    }
+    if (!message?.trim()) return false;
     const db = loadDatabase();
     db.goodbyeMessages[groupJid] = message;
     saveDatabase(db);
-    console.log(chalk.green(`✅ Goodbye message set for ${groupJid}`));
     return true;
   } catch (e) {
     console.error(chalk.red(`❌ Error setting goodbye message: ${e.message}`));
@@ -246,7 +200,6 @@ export function setGoodbyeMessage(groupJid, message) {
   }
 }
 
-// ============ AUTO ADD GROUP MANAGEMENT ============
 export function setAutoAddGroup(groupJid) {
   try {
     const db = loadDatabase();
@@ -283,15 +236,10 @@ export function removeAutoAddGroup() {
   }
 }
 
-// ============ DATABASE UTILITIES ============
 export function getDatabaseStats() {
   try {
     const db = loadDatabase();
-    return {
-      sudoUsers: db.sudoUsers.length,
-      groups: Object.keys(db.groupSettings).length,
-      botMode: db.botMode
-    };
+    return { sudoUsers: db.sudoUsers.length, groups: Object.keys(db.groupSettings).length, botMode: db.botMode };
   } catch (e) {
     console.error(chalk.red(`❌ Error getting database stats: ${e.message}`));
     return {};
@@ -300,14 +248,7 @@ export function getDatabaseStats() {
 
 export function clearDatabase() {
   try {
-    const initialData = {
-      sudoUsers: [],
-      botMode: 'public',
-      groupSettings: {},
-      welcomeMessages: {},
-      goodbyeMessages: {},
-      autoAddGroup: null
-    };
+    const initialData = { sudoUsers: [], botMode: 'public', groupSettings: {}, welcomeMessages: {}, goodbyeMessages: {}, autoAddGroup: null };
     saveDatabase(initialData);
     console.log(chalk.green(`✅ Database cleared`));
     return true;
