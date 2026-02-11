@@ -69,7 +69,6 @@ Set these environment variables in your hosting dashboard:
 
 - 🔑 Pairing Code: Link via phone number instead of QR.  
 - 👥 Admin Tools: Add, kick, promote/demote, tag-all, group settings and more.
-- 🔥 Fun Games: Some of fun games to play between users across groups.
 - ⚡ Reliability: Auto-reconnect with optional keep-alive server.  
 - 🛡️ Security: Rate limiting, admin checks, and safe command handling.  
 
