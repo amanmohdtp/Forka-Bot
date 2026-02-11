@@ -907,4 +907,4 @@ export async function handleGroupUpdate(sock, update, config) {
   }
 }
 
-export { lidCache, jidToNumber, numberToLid, storeLid, clearCachedGroup };
+export { lidCache };
