@@ -2,7 +2,6 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
-  Browsers,
   DisconnectReason
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
@@ -35,6 +34,7 @@ async function startBot() {
 
   let pairingCodeSent = false;
   let connectionAttempts = 0;
+  let pairTimer = null; // Holds the reference to our pairing delay
 
   const sock = makeWASocket({
     version,
@@ -44,7 +44,8 @@ async function startBot() {
     },
     logger: pino({ level: 'silent' }),
     printQRInTerminal: false,
-    browser: Browsers.ubuntu('Chrome'),
+    // 👈 FIXED: Switched to a standard array format mimicking macOS Chrome to avoid server rejections
+    browser: ['Mac OS', 'Chrome', '126.0.0.0'],
     getMessage: async () => undefined,
     markOnlineOnConnect: true,
     syncFullHistory: false,
@@ -58,41 +59,61 @@ async function startBot() {
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
 
+    // ── FIXED PAIRING CODE LOGIC ──────────────────────────────────────────
     if (connection === 'connecting' && !state.creds.registered && !pairingCodeSent) {
+      // Step 1: Lock out duplicate connection events instantly
+      pairingCodeSent = true;
+
       const pairingNumber = config.pairingNumber.replace(/[^0-9]/g, '');
       if (!pairingNumber) {
         console.log(chalk.red('\n❌ PAIRING_NUMBER missing in .env\n'));
         process.exit(1);
       }
-      try {
-        const code = await sock.requestPairingCode(pairingNumber);
-        pairingCodeSent = true;
-        console.log(chalk.green('\n' + '='.repeat(50)));
-        console.log(chalk.green.bold('  📱 PAIRING CODE: ') + chalk.yellow.bold(code));
-        console.log(chalk.green('='.repeat(50) + '\n'));
-      } catch (err) {
-        pairingCodeSent = false;
-        console.error(chalk.red('❌ Pairing failed:'), err.message);
-      }
+
+      // Step 2: Establish a 3-second buffer to let the WebSocket handshake settle
+      if (pairTimer) clearTimeout(pairTimer);
+      pairTimer = setTimeout(async () => {
+        try {
+          console.log(chalk.cyan(`📲 Querying server for pairing code (+${pairingNumber})...`));
+          const code = await sock.requestPairingCode(pairingNumber);
+          
+          // Format the code nicely for terminal display (e.g., ABCD-EFGH)
+          const formattedCode = (code.match(/.{1,4}/g) || [code]).join('-');
+          
+          console.log(chalk.green('\n' + '='.repeat(50)));
+          console.log(chalk.green.bold('  📱 PAIRING CODE: ') + chalk.yellow.bold(formattedCode));
+          console.log(chalk.green('='.repeat(50) + '\n'));
+        } catch (err) {
+          pairingCodeSent = false;
+          console.error(chalk.red('❌ Pairing code request failed:'), err.message);
+        }
+      }, 3000);
     }
+    // ───────────────────────────────────────────────────────────────────────
 
     if (connection === 'close') {
+      if (pairTimer) clearTimeout(pairTimer);
+      pairingCodeSent = false;
+
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code === DisconnectReason.loggedOut) {
-        console.log(chalk.red('\n❌ Logged out – deleting session\n'));
+        console.log(chalk.red('\n❌ Logged out – deleting session directory\n'));
         fs.rmSync(AUTH_DIR, { recursive: true, force: true });
         process.exit(0);
       } else {
         connectionAttempts++;
         const delay = Math.min(connectionAttempts * 2000, 30000);
         console.log(chalk.yellow(`🔄 Reconnecting in ${delay/1000}s (attempt ${connectionAttempts})`));
-        pairingCodeSent = false;
         setTimeout(() => startBot(), delay);
       }
-    } else if (connection === 'open') {
+    } 
+    
+    else if (connection === 'open') {
+      if (pairTimer) clearTimeout(pairTimer);
       connectionAttempts = 0;
       pairingCodeSent = false;
-      console.log(chalk.green('\n✅ Bot connected'));
+      
+      console.log(chalk.green('\n✅ Bot connected successfully'));
       console.log(chalk.white(`📱 Number: +${sock.user.id.split(':')[0]}`));
       console.log(chalk.white(`🔧 Prefix: ${config.prefix}\n`));
 
@@ -149,7 +170,7 @@ console.log(chalk.cyan.bold(`\n🤖 ${config.botName} v${config.version}\n`));
 const alreadyAuthenticated = fs.existsSync(path.join(AUTH_DIR, 'creds.json'));
 console.log(alreadyAuthenticated
   ? chalk.green('✅ Using existing session\n')
-  : chalk.yellow('⚠️  No session – pairing required\n'));
+  : chalk.yellow('⚠️  No session – pairing required in ~3 seconds\n'));
 
 startBot().catch(err => {
   console.error(chalk.red('Startup failed:'), err.message);
